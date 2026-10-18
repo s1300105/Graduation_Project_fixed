@@ -246,11 +246,15 @@ THRESHOLDS = np.linspace(0.05, 0.95, 19)
 
 
 def best_threshold(probs, labels):
-    best = None
-    for t in THRESHOLDS:
-        m = metrics_at(probs, labels, float(t))
-        if best is None or m["f1"] > best["f1"]:
-            best = m
+    """Threshold on the 0.05..0.95 grid maximising F1. Ties (e.g. saturated
+    probabilities, where many thresholds give the same F1) are broken toward
+    0.5; the number of tied thresholds is reported so saturation is visible."""
+    cands = [metrics_at(probs, labels, float(t)) for t in THRESHOLDS]
+    top = max(round(m["f1"], 12) for m in cands)
+    tied = [m for m in cands if round(m["f1"], 12) == top]
+    best = min(tied, key=lambda m: (abs(m["threshold"] - 0.5), m["threshold"]))
+    best = dict(best)
+    best["n_thresholds_tied"] = len(tied)
     return best
 
 
@@ -297,12 +301,19 @@ def train_one_epoch(model, loader, optimizer, scheduler, criterion, device, clip
 
 
 def make_optimizer(model, lr, bert_lr, weight_decay):
+    """AdamW with separate learning rates for CodeBERT and the new modules; biases
+    and the parameters of LayerNorm / Embedding modules (found by module type,
+    not by name) get no weight decay."""
+    no_decay_ids = set()
+    for mod in model.modules():
+        if isinstance(mod, (nn.LayerNorm, nn.Embedding)):
+            no_decay_ids.update(id(q) for q in mod.parameters(recurse=False))
     decay, no_decay, bert_decay, bert_no_decay = [], [], [], []
     for name, p in model.named_parameters():
         if not p.requires_grad:
             continue
         is_bert = "func_encoder.bert" in name
-        is_nd = name.endswith(".bias") or "LayerNorm" in name or "layer_norm" in name.lower() or ".norm" in name
+        is_nd = name.endswith(".bias") or id(p) in no_decay_ids
         (bert_no_decay if is_bert and is_nd else bert_decay if is_bert else no_decay if is_nd else decay).append(p)
     groups = []
     if decay: groups.append({"params": decay, "lr": lr, "weight_decay": weight_decay})
@@ -314,7 +325,7 @@ def make_optimizer(model, lr, bert_lr, weight_decay):
 
 def run_name_for(args, batch_size, lr, ratio, seed):
     tag = args.model_type + ("" if args.ablation == "none" else f"-{args.ablation}")
-    return f"{tag}_bs{batch_size}_lr{lr:.0e}_br{ratio:.2f}_seed{seed}"
+    return f"{tag}_bs{batch_size}_lr{lr:.1e}_br{ratio:.2f}_seed{seed}"
 
 
 def plot_curves(run_dir: Path):
@@ -353,7 +364,8 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
     set_seed(seed, deterministic=not args.no_deterministic)
     input_dir = Path(args.data_root) / "input"
     run_dir = Path(args.runs_dir) / run_name_for(args, batch_size, lr, ratio, seed)
-    run_dir.mkdir(parents=True, exist_ok=True)
+    if (run_dir / "args.json").exists() and not args.overwrite:
+        raise RuntimeError(f"{run_dir} already holds a run; pass --overwrite to replace it")
 
     train_files = split_files(input_dir, "train")
     if not train_files:
@@ -368,12 +380,15 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
     test_loader, _ = make_loader(input_dir, "test", batch_size=args.eval_batch_size, shuffle=False, seed=seed)
     if val_loader is None:
         raise RuntimeError("valid split is empty; model selection needs it")
+    if test_loader is None:
+        raise RuntimeError("test split is empty; the run would have nothing to evaluate (need test_*_input.pkl)")
+    run_dir.mkdir(parents=True, exist_ok=True)
 
     model = build_model(args.model_type, device, num_relations=num_relations, node_feat_dim=node_feat_dim,
                         hidden_dim=args.hidden_dim, num_rgcn_layers=args.rgcn_layers,
                         fusion_layers=args.fusion_layers, tune_last_n_layers=args.tune_last_n_layers,
                         max_length=args.max_length, ablation=args.ablation,
-                        gate_temperature=args.gate_temperature)
+                        gate_temperature=args.gate_temperature, seed=seed)
     n_new = sum(p.numel() for n, p in model.named_parameters() if "func_encoder" not in n)
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -563,7 +578,8 @@ def embed_generate(args):
                 counts["rows_with_extra_graphs"] += 1
             nodes = funcs[0]
             g = nodes_to_input(nodes, row.target, args.max_nodes, mode=args.node_embedding,
-                               reverse_edges=args.reverse_edges, max_len=args.node_max_len)
+                               reverse_edges=args.reverse_edges, max_len=args.node_max_len,
+                               code_mode=args.node_code_mode)
             g.func = row.func
             g.idx = int(row["idx"]) if "idx" in row and pd.notna(row["idx"]) else -1
             counts["graphs"] += 1
@@ -580,7 +596,8 @@ def embed_generate(args):
         "reverse_edges": bool(args.reverse_edges),
         "num_relations": NUM_RELATIONS * (2 if args.reverse_edges else 1),
         "relations": list(RELATIONS), "node_feat_dim": 768, "max_nodes": args.max_nodes,
-        "node_embedding": args.node_embedding, "node_max_len": args.node_max_len, "counts": counts,
+        "node_embedding": args.node_embedding, "node_max_len": args.node_max_len,
+        "node_code_mode": args.node_code_mode, "counts": counts,
         "nodes_mean": float(np.mean(nc)) if nc else None, "edges_mean": float(np.mean(ec)) if ec else None,
     }
     (input_dir / "manifest.json").write_text(json.dumps(manifest, indent=1))
@@ -617,6 +634,8 @@ def build_parser():
     p.add_argument("--max_nodes", type=int, default=500)
     p.add_argument("--node_embedding", choices=["codebert", "fast"], default="codebert")
     p.add_argument("--node_max_len", type=int, default=128)
+    p.add_argument("--node_code_mode", choices=["full", "first_line"], default="full",
+                   help="CODE text embedded per node: full Joern CODE (thesis; container nodes carry the whole nested source) or its first line only")
     p.add_argument("--reverse_edges", action="store_true", help="add reversed edges as relations 3..5")
     p.add_argument("--num_relations", type=int, default=3, help="used only when input/manifest.json is absent")
     # model
@@ -646,8 +665,8 @@ def build_parser():
     p.add_argument("--seed", type=int, default=42, help="seed for data shuffling at --cpg time")
     p.add_argument("--no_deterministic", action="store_true")
     p.add_argument("--runs_dir", default="runs")
+    p.add_argument("--overwrite", action="store_true", help="replace an existing run directory of the same name")
     p.add_argument("--run_dir", help="(--mode test) run directory holding best.pth and args.json")
-    p.add_argument("--wandb", action="store_true", help="also log to Weights & Biases (optional dependency)")
     return p
 
 
@@ -694,13 +713,17 @@ def main(argv=None):
         model = build_model(a.model_type, device, num_relations=meta["num_relations"], node_feat_dim=meta["node_feat_dim"],
                             hidden_dim=a.hidden_dim, num_rgcn_layers=a.rgcn_layers, fusion_layers=a.fusion_layers,
                             tune_last_n_layers=a.tune_last_n_layers, max_length=a.max_length, ablation=a.ablation,
-                            gate_temperature=a.gate_temperature)
+                            gate_temperature=a.gate_temperature, seed=meta["seed"])
         model.load_state_dict(torch.load(run_dir / "best.pth", map_location=device))
         input_dir = Path(args.data_root) / "input"
         val_loader, _ = make_loader(input_dir, "valid", batch_size=args.eval_batch_size, shuffle=False, seed=0)
         test_loader, _ = make_loader(input_dir, "test", batch_size=args.eval_batch_size, shuffle=False, seed=0)
         res = evaluate_run(model, run_dir, val_loader, test_loader, device)
-        (run_dir / "metrics.json").write_text(json.dumps(res, indent=1))
+        metrics_path = run_dir / "metrics.json"
+        merged = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
+        merged.update(res)          # keep best_epoch / best_val_selection_f1 / select_on from training
+        merged["reevaluated"] = True
+        metrics_path.write_text(json.dumps(merged, indent=1))
         print(json.dumps({k: v for k, v in res.items() if k.startswith("test")}, indent=1))
 
 

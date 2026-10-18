@@ -12,6 +12,7 @@ Fixed relative to the thesis code (audit M20 / M26 / M39):
 import json
 import os
 import re
+import shutil
 import subprocess
 from pathlib import Path
 
@@ -67,6 +68,8 @@ def joern_create(joern_path: str, in_path: str, out_path: str, cpg_files: list, 
             print(f"[OK] Wrote: {json_out}")
         else:
             print(f"[ERROR] Expected output missing: {json_out}")
+        # importCpg() copies the CPG into <cwd>/workspace/<name>/; drop it (it doubles disk use per slice)
+        shutil.rmtree(out_dir / "workspace", ignore_errors=True)
     return results
 
 

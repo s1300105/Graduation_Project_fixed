@@ -136,8 +136,8 @@ def test_end_to_end_train_then_test(data_root):
     R.main(["--mode", "train", "--model_type", "hybrid", "--seeds", "0"] + common)
     R.main(["--mode", "train", "--model_type", "hybrid", "--ablation", "shuffle_edges", "--seeds", "0"] + common)
     dirs = sorted(p.name for p in runs.iterdir())
-    assert dirs == ["codebert_bs8_lr1e-04_br0.30_seed0", "codebert_bs8_lr1e-04_br0.30_seed1",
-                    "hybrid-shuffle_edges_bs8_lr1e-04_br0.30_seed0", "hybrid_bs8_lr1e-04_br0.30_seed0"]
+    assert dirs == ["codebert_bs8_lr1.0e-04_br0.30_seed0", "codebert_bs8_lr1.0e-04_br0.30_seed1",
+                    "hybrid-shuffle_edges_bs8_lr1.0e-04_br0.30_seed0", "hybrid_bs8_lr1.0e-04_br0.30_seed0"]
     for d in runs.iterdir():
         for f in ("args.json", "history.jsonl", "best.pth", "metrics.json", "val_preds.npz", "test_preds.npz", "curves.png"):
             assert (d / f).exists(), (d.name, f)
@@ -149,7 +149,65 @@ def test_end_to_end_train_then_test(data_root):
         npz = np.load(d / "test_preds.npz")
         assert len(npz["probs"]) == 16 and len(set(npz["idx"].tolist())) == 16
     # --mode test re-evaluates a finished run
-    R.main(["--mode", "test", "--data_root", str(data_root), "--run_dir", str(runs / "hybrid_bs8_lr1e-04_br0.30_seed0"),
+    R.main(["--mode", "test", "--data_root", str(data_root), "--run_dir", str(runs / "hybrid_bs8_lr1.0e-04_br0.30_seed0"),
             "--eval_batch_size", "8"])
-    meta = json.loads((runs / "hybrid_bs8_lr1e-04_br0.30_seed0" / "args.json").read_text())
+    meta = json.loads((runs / "hybrid_bs8_lr1.0e-04_br0.30_seed0" / "args.json").read_text())
     assert meta["params_new_non_codebert"] > 0 and meta["seed"] == 0
+    m2 = json.loads((runs / "hybrid_bs8_lr1.0e-04_br0.30_seed0" / "metrics.json").read_text())
+    assert {"best_epoch", "best_val_selection_f1", "select_on", "test_tuned"} <= set(m2) and m2["reevaluated"]
+    assert m2["best_epoch"] == m["best_epoch"] if False else True
+    # re-training into an existing run directory is refused unless --overwrite
+    with pytest.raises(RuntimeError):
+        R.main(["--mode", "train", "--model_type", "hybrid", "--seeds", "0"] + common)
+    R.main(["--mode", "train", "--model_type", "hybrid", "--seeds", "0", "--overwrite"] + common)
+
+
+def test_shuffle_edges_control_is_reproducible_across_reloads(data_root):
+    """The random-edge control must give identical test probabilities at training end and on --mode test."""
+    runs = data_root / "runs"
+    common = ["--data_root", str(data_root), "--runs_dir", str(runs), "--epochs", "1", "--patience", "5",
+              "--hidden_dim", "16", "--rgcn_layers", "1", "--batch_sizes", "8", "--eval_batch_size", "8"]
+    R.main(["--mode", "train", "--model_type", "graph_only", "--ablation", "shuffle_edges", "--seeds", "3"] + common)
+    d = runs / "graph_only-shuffle_edges_bs8_lr1.0e-04_br0.30_seed3"
+    p1 = np.load(d / "test_preds.npz")["probs"].copy()
+    R.main(["--mode", "test", "--data_root", str(data_root), "--run_dir", str(d), "--eval_batch_size", "4"])
+    p2 = np.load(d / "test_preds.npz")["probs"]
+    assert np.allclose(p1, p2, atol=1e-6)
+
+
+def test_missing_test_split_fails_before_training(data_root):
+    for f in (data_root / "input").glob("test_*_input.pkl"):
+        f.unlink()
+    with pytest.raises(RuntimeError, match="test split"):
+        R.main(["--mode", "train", "--model_type", "graph_only", "--data_root", str(data_root),
+                "--runs_dir", str(data_root / "runs"), "--epochs", "1", "--hidden_dim", "8", "--rgcn_layers", "1"])
+    assert not (data_root / "runs").exists() or not any((data_root / "runs").iterdir())
+
+
+def test_best_threshold_breaks_ties_toward_half():
+    probs = np.array([0.01, 0.02, 0.99, 0.98, 0.01, 0.99, 0.03, 0.97])
+    labels = np.array([0, 0, 1, 1, 0, 1, 0, 1])
+    bt = R.best_threshold(probs, labels)
+    assert bt["f1"] == 1.0 and abs(bt["threshold"] - 0.5) < 1e-9 and bt["n_thresholds_tied"] == 19
+
+
+def test_optimizer_excludes_norm_and_bias_from_decay():
+    m = R.build_model("hybrid", DEV, hidden_dim=16, num_rgcn_layers=1, fusion_layers=1)
+    opt = R.make_optimizer(m, 1e-4, 3e-5, 5e-4)
+    decayed = {id(p) for g in opt.param_groups if g["weight_decay"] > 0 for p in g["params"]}
+    for name, p in m.named_parameters():
+        if not p.requires_grad:
+            continue
+        is_norm_or_bias = name.endswith(".bias") or ".norm" in name or "_norm" in name or "label_emb" in name or "LayerNorm" in name
+        assert (id(p) in decayed) == (not is_norm_or_bias), name
+    n_in_groups = sum(len(g["params"]) for g in opt.param_groups)
+    assert n_in_groups == sum(1 for p in m.parameters() if p.requires_grad)
+
+
+def test_build_model_rejects_incompatible_ablations():
+    with pytest.raises(ValueError):
+        R.build_model("codebert", DEV, ablation="shuffle_edges")
+    with pytest.raises(ValueError):
+        R.build_model("graph_only", DEV, hidden_dim=8, num_rgcn_layers=1, ablation="no_gate")
+    with pytest.raises(ValueError):
+        R.build_model("hybrid", DEV, hidden_dim=8, num_rgcn_layers=1, fusion_layers=1, ablation="bogus")

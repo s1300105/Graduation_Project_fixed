@@ -2,7 +2,7 @@
 """
 Node features and PyG ``Data`` construction.
 
-Fixed relative to the thesis code (audit M13 / M22 / M25):
+Fixed relative to the thesis code (audit M13 / M25; M22 only partially, see node_code_text):
   * ``x`` is the 768-d frozen-CodeBERT CLS of the node's CODE string only;
     the Joern node label travels separately as ``node_label`` (long) so the
     model can embed it (the original packed a one-bit regex flag into x);
@@ -30,14 +30,28 @@ BERT_DIM = 768
 _NODES_EMBEDDERS = {}
 
 
-def get_nodes_embedding(nodes_dim: int, *, mode: str = "codebert", max_len: int = 128):
-    key = (int(nodes_dim), mode, int(max_len))
+def get_nodes_embedding(nodes_dim: int, *, mode: str = "codebert", max_len: int = 128,
+                        code_mode: str = "full"):
+    key = (int(nodes_dim), mode, int(max_len), code_mode)
     if key not in _NODES_EMBEDDERS:
         _NODES_EMBEDDERS[key] = NodesEmbedding(
             nodes_dim=int(nodes_dim), max_len=max_len, batch_size=32,
-            dtype=torch.float16, mode=mode,
+            dtype=torch.float16, mode=mode, code_mode=code_mode,
         )
     return _NODES_EMBEDDERS[key]
+
+
+def node_code_text(node, code_mode: str = "full") -> str:
+    """CODE string fed to CodeBERT for one node.
+    code_mode="full": Joern's CODE property verbatim (thesis behaviour; a BLOCK /
+    METHOD / CONTROL_STRUCTURE node then carries its whole enclosed source,
+    audit M22). code_mode="first_line": only the first line, so container
+    nodes contribute their header rather than the nested text."""
+    code = node.get_code()
+    code = code if isinstance(code, str) else str(code)
+    if code_mode == "first_line":
+        return code.split("\n", 1)[0].strip()
+    return code
 
 
 class NodesEmbedding:
@@ -45,8 +59,9 @@ class NodesEmbedding:
     string) or mode="fast" (cheap deterministic features for tests)."""
 
     def __init__(self, nodes_dim: int, *, max_len: int = 128, batch_size: int = 32,
-                 dtype=torch.float16, mode: str = "codebert"):
+                 dtype=torch.float16, mode: str = "codebert", code_mode: str = "full"):
         self.nodes_dim = int(nodes_dim)
+        self.code_mode = code_mode
         env_fast = os.environ.get("USE_FAST_NODES_EMBEDDING", "").strip() in {"1", "true", "True"}
         self.mode = "fast" if env_fast else mode
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -60,11 +75,17 @@ class NodesEmbedding:
             if RobertaTokenizer is None or RobertaModel is None:
                 raise RuntimeError("transformers is not importable; use mode='fast' or install it.")
             self.tokenizer_bert = RobertaTokenizer.from_pretrained("microsoft/codebert-base")
-            self.bert_model = RobertaModel.from_pretrained(
-                "microsoft/codebert-base",
-                torch_dtype=self.dtype if self.device.type == "cuda" else None,
-                low_cpu_mem_usage=True,
-            ).to(self.device)
+            kw = {"low_cpu_mem_usage": True}
+            if self.device.type == "cuda":
+                kw["dtype"] = self.dtype          # transformers >= 5 name; fall back below
+            try:
+                self.bert_model = RobertaModel.from_pretrained("microsoft/codebert-base", **kw)
+            except TypeError:
+                kw.pop("dtype", None)
+                if self.device.type == "cuda":
+                    kw["torch_dtype"] = self.dtype
+                self.bert_model = RobertaModel.from_pretrained("microsoft/codebert-base", **kw)
+            self.bert_model = self.bert_model.to(self.device)
             self.bert_model.eval()
         else:
             self.tokenizer_bert = None
@@ -78,7 +99,7 @@ class NodesEmbedding:
         node_items = list(nodes.items())
         out = np.zeros((len(node_items), self.feat_dim), dtype=np.float32)
         for i, (_, node) in enumerate(node_items):
-            code = node.get_code() or ""
+            code = node_code_text(node, self.code_mode) or ""
             out[i, 0] = float(len(code))
             out[i, 1] = float(node.get_line_number() or 0)
             out[i, 2] = float(node.get_column_number() or 0)
@@ -92,10 +113,7 @@ class NodesEmbedding:
                                    truncation=True, max_length=self.max_len)
 
     def _embed_nodes_codebert(self, nodes):
-        codes = []
-        for _, node in nodes.items():
-            code = node.get_code()
-            codes.append(code if isinstance(code, str) else str(code))
+        codes = [node_code_text(node, self.code_mode) for _, node in nodes.items()]
         feats = []
         with torch.inference_mode():
             for i in range(0, len(codes), self.batch_size):
@@ -147,9 +165,9 @@ def build_edges_all(nodes, *, reverse_edges: bool = False):
 
 
 def nodes_to_input(nodes, target, nodes_dim, *, mode: str = "codebert",
-                   reverse_edges: bool = False, max_len: int = 128):
+                   reverse_edges: bool = False, max_len: int = 128, code_mode: str = "full"):
     """nodes: OrderedDict[node_id -> node] (already ordered / truncated)."""
-    nodes_embedding = get_nodes_embedding(nodes_dim, mode=mode, max_len=max_len)
+    nodes_embedding = get_nodes_embedding(nodes_dim, mode=mode, max_len=max_len, code_mode=code_mode)
     x = nodes_embedding(nodes)                                   # [N, 768]
     n_real = x.size(0)
     labels = torch.tensor([int(getattr(n, "label_id", NODE_LABEL_TO_ID["<UNK>"])) for n in nodes.values()],

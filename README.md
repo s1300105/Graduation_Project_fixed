@@ -4,7 +4,7 @@
 Vulnerability Detection」（R-GCN + CodeBERT, BigVul）の実装
 [s1300105/Graduation_Project](https://github.com/s1300105/Graduation_Project) を、
 監査（元リポジトリの `audit/REPORT_ja.md`）で見つかった欠陥を直して作り直した版です。
-初回コミットは元リポジトリ `a7122a4` の無改変コピーなので、`git diff <初回コミット>..HEAD` が修正の全体です。
+初回コミットは元リポジトリ `a7122a4` の**ソースファイルだけ**を無改変で取り込んだもの（生成物の `plots*/`、`lib/`、`data/data_for_checking/`、`results.txt`、pip ログ、`.deb` は入れていない）なので、ソースの修正は `git diff <初回コミット>..HEAD` で全て追えます。
 
 ## 何を直したか（監査 ID との対応）
 
@@ -14,7 +14,8 @@ Vulnerability Detection」（R-GCN + CodeBERT, BigVul）の実装
 | M20 | Joern の `<global>` 疑似関数で全関数が二重化 | `graph_indexing` と `parse_to_functions` の両方で `<global>` を捨てる | `utils/process/cpg_generator.py`, `cpg.py` |
 | M21 | 全関数を `.c` で書き出し、C++ 関数が 2 ノードの殻になる | `lang` 列または C++ 構文の検出で `.cpp` に書き出す | `utils/data/datamanager.py` |
 | M13 | 未正規化の凍結 CLS をそのまま `input_proj` に入れていた | 入力に LayerNorm | `models/LMGNN.py` |
-| M22 / M25 | ノードラベルを 1 ビットに潰し、辺は順方向のみ | Joern ラベルを埋め込み（`node_label`）、`--reverse_edges` で逆関係を追加可能 | `cpg.py`, `embeddings.py`, `LMGNN.py` |
+| M25 | ノードラベルを 1 ビットに潰し、辺は順方向のみ | Joern ラベルを埋め込み（`node_label`）、`--reverse_edges` で逆関係を追加可能 | `cpg.py`, `embeddings.py`, `LMGNN.py` |
+| M22 | ノード特徴が入れ子の `CODE` 全文（BLOCK = 関数本体）の凍結 CLS で、テキスト枝と冗長 | **部分対応**: `--node_code_mode first_line` で各ノードの先頭行だけを埋め込む選択肢を追加。既定は論文どおり `full`。テキスト枝が持たない特徴（抽象データフロー等）への置き換えは未着手 | `embeddings.py` |
 | M12 | ハイブリッドがベースラインの上位互換でない（CLS 読み出しを捨てていた） | `cls_skip`: CodeBERT の CLS を融合ベクトルに連結して分類器へ（既定 on） | `LMGNN.py` |
 | M15 | ゲートに温度も正則化もなく崩壊する | `--gate_temperature`、`--ablation no_gate` | `layers.py` |
 | M18 / M08 | 6 層 R-GCN に残差・dropout なし、勾配クリッピングなし | 層ごとに残差 + LayerNorm + dropout（`--ablation no_residual` で無効化）、`--clip_grad` | `LMGNN.py`, `run.py` |
@@ -38,17 +39,17 @@ HEAD にだけあった pre-GCN attention と 768 次元化は論文にないの
 
 ## 検証済み / 未検証
 
-- `pytest tests/`（36 件、CPU）: 実パイプライン形式のサンプル `data/check_data/cpg_head_check.json` に対する辺種別の一致（Joern が出した 67 AST / 59 CFG / 37 PDG と完全一致）、`<global>` の除外、3 モデル種 × アブレーションの forward / backward、損失の式、ストリームの順序、2 seed × 3 設定の端から端までの学習・評価・再評価、分割スクリプト、Joern v4.0.400 の実出力（`tests/fixtures/joern_v4_export.json`）の読み込み。
-- Joern v4.0.400 を使って `tests/fixtures/joern_inputs/` の 12 関数で `run.py --cpg --embed --node_embedding fast` → `--mode train`（hybrid / graph_only、2 seed）→ `scripts/compare_runs.py` まで通した。C++ の 6 関数は `.cpp` として書き出され、`CClient::ClearServerDependentCaps` が 80 ノード・AST 79 / CFG 64 / PDG 198 本の本物のグラフになる（元のコードでは 2 ノードの殻）。
+- `pytest`（37 件、CPU）: 実パイプライン形式のサンプル `data/check_data/cpg_head_check.json` に対する辺種別の一致（Joern が出した 67 AST / 59 CFG / 37 PDG と完全一致）、`<global>` の除外、3 モデル種 × アブレーションの forward / backward、損失の式、ストリームの順序、2 seed × 3 設定の端から端までの学習・評価・再評価、分割スクリプト、Joern v4.0.400 の実出力（`tests/fixtures/joern_v4_export.json`）の読み込み。
+- Joern v4.0.400 を使って `tests/fixtures/joern_inputs/` の 12 関数で `run.py --cpg --embed --node_embedding fast` → `--mode train`（hybrid / graph_only、2 seed）→ `scripts/compare_runs.py` まで通した。12 ファイル中 7 件が `.cpp`（うち 101 は初期化子リストだけのコンストラクタ断片）、5 件が `.c` として書き出され、`CClient::ClearServerDependentCaps` が 80 ノード・AST 79 / CFG 64 / PDG 198 本の本物のグラフになる（元のコードでは 2 ノードの殻）。
 - **Joern で解析できない関数は除外される**（12 件中 2 件: クラス文脈のないコンストラクタ断片 `KillRing() : size(0), ...` と、シグネチャにマクロ `UNUSED` を含む関数）。元のコードはこれらを `<global>` の殻として学習に流していた。除外数は `data/cpg/cpg_manifest.json` の `rows_lost_in_joern` に出るので論文に書くこと。両腕とも同じ入力ファイルを読むので比較は対称。
-- **未検証**: BigVul 全体での CPG 生成・学習（データと GPU が要る）。CodeBERT ノード埋め込み（`--node_embedding codebert`）はクラス単体でテスト済みだが全データでは未実行。
+- **未検証**: BigVul 全体での CPG 生成・学習（データと GPU が要る）。CodeBERT ノード埋め込み（`--node_embedding codebert`）は 75 ノードのサンプルに対するテスト（`tests/test_node_embedding_codebert.py`）のみで、全データでは未実行。
 
 ## 使い方
 
 ```bash
 python -m venv venv && . venv/bin/activate
 pip install -r requirements.txt     # CUDA 版 torch は環境に合わせて先に入れる
-pytest tests -q
+pytest -q
 
 # 1. BigVul CSV -> jsonl（コメント除去、ラベル衝突の除去、完全一致 dedup、80/10/10）
 python data/scripts/make_bigvul_json.py --input_csv data/raw/MSR_data_cleaned.csv \
@@ -57,7 +58,7 @@ python data/scripts/make_bigvul_json.py --input_csv data/raw/MSR_data_cleaned.cs
 # 2. Joern 4.x を joern/joern-cli/ に置く（検証に使ったのは v4.0.400: github.com/joernio/joern/releases/download/v4.0.400/joern-cli.zip）
 
 # 3. CPG と埋め込み
-python run.py --cpg --embed --dataset bigvul                 # --reverse_edges で逆関係を追加
+python run.py --cpg --embed --dataset bigvul                 # --reverse_edges で逆関係、--node_code_mode first_line で M22 の緩和
 cat data/cpg/cpg_manifest.json data/input/manifest.json      # 件数・陽性数・<global> 除外数
 
 # 4. 学習（論文の設定: bs16, lr1e-4, CodeBERT lr 比 0.3, 200 epoch, patience 50）を 3 seed で
@@ -68,11 +69,11 @@ python run.py --mode train --model_type hybrid --ablation shuffle_edges --seeds 
 python run.py --mode train --model_type hybrid --ablation no_gate --seeds 0 1 2
 
 # 5. 対応つき比較（同じテスト集合、各 run は自分の検証調整閾値）
-python scripts/compare_runs.py --a "runs/hybrid_bs16_lr1e-04_br0.30_seed*" --b "runs/codebert_bs16_lr1e-04_br0.30_seed*"
-python scripts/compare_runs.py --a "runs/hybrid_bs16_lr1e-04_br0.30_seed*" --b "runs/hybrid-shuffle_edges_bs16_lr1e-04_br0.30_seed*"
+python scripts/compare_runs.py --a "runs/hybrid_bs16_lr1.0e-04_br0.30_seed*" --b "runs/codebert_bs16_lr1.0e-04_br0.30_seed*"
+python scripts/compare_runs.py --a "runs/hybrid_bs16_lr1.0e-04_br0.30_seed*" --b "runs/hybrid-shuffle_edges_bs16_lr1.0e-04_br0.30_seed*"
 
 # 6. 既存 run の再評価
-python run.py --mode test --run_dir runs/hybrid_bs16_lr1e-04_br0.30_seed0
+python run.py --mode test --run_dir runs/hybrid_bs16_lr1.0e-04_br0.30_seed0
 ```
 
 グリッドサーチは `--batch_sizes 8 16 32 --lrs 1e-4 5e-5 3e-5 1e-5 --bert_lr_ratios 0.1 0.2 0.3` のように

@@ -7,7 +7,7 @@ cross-attention blocks -> masked mean pooling -> softmax gate -> classifier.
 
 Fixes / additions relative to the thesis code (audit ids in brackets):
   * LayerNorm on the node features before ``input_proj`` [M13];
-  * Joern node label embedding instead of a one-bit regex flag [M22/M25];
+  * Joern node label embedding instead of a one-bit regex flag [M25];
   * residual connection + dropout + LayerNorm inside the R-GCN stack
     (``rgcn_residual``) [M18];
   * ``cls_skip``: the pretrained CLS vector is concatenated to the fused
@@ -61,17 +61,30 @@ def _batch_index(data, x):
     return batch_idx, 1, torch.tensor([0, x.size(0)], device=x.device)
 
 
-def shuffle_edges_within_graph(edge_index, batch_idx, ptr):
+def shuffle_edges_within_graph(edge_index, batch_idx, ptr, *, seed: int = 0, graph_ids=None):
     """Random-edge control: keep every edge's source and relation, replace its
-    destination by a uniformly random node of the same graph."""
+    destination by a uniformly random node of the same graph.
+
+    Deterministic per sample: the destinations of graph b are drawn from a
+    generator seeded by (seed, graph id), where graph id is ``data.idx`` when
+    present, so training, per-epoch validation and a later ``--mode test``
+    all evaluate the same shuffled graph."""
     if edge_index.numel() == 0:
         return edge_index
     src = edge_index[0]
     g = batch_idx[src]
-    start = ptr[g]
-    size = (ptr[g + 1] - ptr[g]).clamp(min=1)
-    rnd = torch.rand(src.size(0), device=edge_index.device)
-    dst = start + (rnd * size).long().clamp(max=size - 1)
+    dst = torch.empty_like(src)
+    n_graphs = ptr.numel() - 1
+    for b in range(n_graphs):
+        m = g == b
+        k = int(m.sum())
+        if k == 0:
+            continue
+        n = max(1, int(ptr[b + 1] - ptr[b]))
+        gid = int(graph_ids[b]) if graph_ids is not None else b
+        gen = torch.Generator(device="cpu").manual_seed((seed * 1_000_003 + gid) % (2 ** 63 - 1))
+        r = torch.randint(0, n, (k,), generator=gen).to(edge_index.device)
+        dst[m] = ptr[b] + r
     return torch.stack([src, dst], dim=0)
 
 
@@ -82,13 +95,14 @@ class BertRGCN(nn.Module):
                  rgcn_residual: bool = True, input_norm: bool = True, use_node_labels: bool = True,
                  use_gate: bool = True, gate_temperature: float = 1.0, cls_skip: bool = True,
                  graph_only: bool = False, shuffle_edges: bool = False, tune_last_n_layers: int = 2,
-                 max_length: int = 512, model_name: str = CODEBERT, device=None):
+                 max_length: int = 512, model_name: str = CODEBERT, device=None, seed: int = 0):
         super().__init__()
         self.device = device or torch.device("cpu")
         self.hidden_dim = hidden_dim
         self.graph_only = graph_only
         self.cls_skip = cls_skip and not graph_only
         self.shuffle_edges = shuffle_edges
+        self.shuffle_seed = int(seed)
         self.max_length = max_length
         self.rgcn_residual = rgcn_residual
         self.use_node_labels = use_node_labels
@@ -152,7 +166,12 @@ class BertRGCN(nn.Module):
         h = self.input_proj(x)
         edge_index, edge_type = data.edge_index, data.edge_type
         if self.shuffle_edges:
-            edge_index = shuffle_edges_within_graph(edge_index, batch_idx, ptr)
+            gids = getattr(data, "idx", None)
+            if gids is not None and not torch.is_tensor(gids):
+                gids = torch.as_tensor(gids)
+            if gids is not None and gids.numel() != ptr.numel() - 1:
+                gids = None
+            edge_index = shuffle_edges_within_graph(edge_index, batch_idx, ptr, seed=self.shuffle_seed, graph_ids=gids)
         for i, conv in enumerate(self.rgcn_layers):
             out = F.relu(conv(h, edge_index, edge_type))
             out = self.rgcn_dropout(out)
@@ -210,21 +229,31 @@ class CodeBERTOnly(nn.Module):
         return self.classifier(cls)
 
 
+ABLATIONS = ("none", "no_gate", "no_cls_skip", "shuffle_edges", "no_input_norm", "no_residual")
+
+
 def build_model(model_type: str, device, *, num_relations: int = 3, node_feat_dim: int = 768,
                 hidden_dim: int = 200, num_rgcn_layers: int = 6, fusion_layers: int = 3,
                 tune_last_n_layers: int = 2, max_length: int = 512, ablation: str = "none",
                 gate_temperature: float = 1.0, rgcn_residual: bool = True, input_norm: bool = True,
-                use_node_labels: bool = True):
+                use_node_labels: bool = True, seed: int = 0):
     """model_type: hybrid | codebert | graph_only.
-    ablation (hybrid only): none | no_gate | no_cls_skip | shuffle_edges | no_input_norm | no_residual."""
+    ablation: none | no_gate | no_cls_skip | shuffle_edges | no_input_norm | no_residual
+    (no_gate / no_cls_skip need the fusion, i.e. the hybrid; codebert takes none)."""
+    if ablation not in ABLATIONS:
+        raise ValueError(f"unknown ablation {ablation}")
     if model_type == "codebert":
+        if ablation != "none":
+            raise ValueError("ablations apply to hybrid / graph_only only; the CodeBERT baseline has no graph branch")
         return CodeBERTOnly(device=device, tune_last_n_layers=tune_last_n_layers,
                             max_length=max_length, hidden_dim=hidden_dim).to(device)
     kw = dict(node_feat_dim=node_feat_dim, hidden_dim=hidden_dim, num_rgcn_layers=num_rgcn_layers,
               num_relations=num_relations, fusion_layers=fusion_layers, tune_last_n_layers=tune_last_n_layers,
               max_length=max_length, device=device, gate_temperature=gate_temperature,
-              rgcn_residual=rgcn_residual, input_norm=input_norm, use_node_labels=use_node_labels)
+              rgcn_residual=rgcn_residual, input_norm=input_norm, use_node_labels=use_node_labels, seed=seed)
     if model_type == "graph_only":
+        if ablation in ("no_gate", "no_cls_skip"):
+            raise ValueError(f"ablation {ablation} needs the fusion module; graph_only has none")
         kw["graph_only"] = True
     elif model_type != "hybrid":
         raise ValueError(f"unknown model_type {model_type}")
@@ -238,6 +267,4 @@ def build_model(model_type: str, device, *, num_relations: int = 3, node_feat_di
         kw["input_norm"] = False
     elif ablation == "no_residual":
         kw["rgcn_residual"] = False
-    elif ablation != "none":
-        raise ValueError(f"unknown ablation {ablation}")
     return BertRGCN(**kw).to(device)

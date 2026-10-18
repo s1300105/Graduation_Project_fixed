@@ -77,12 +77,29 @@ def test_reverse_edge_relations(batch):
 
 
 def test_shuffle_edges_keeps_edges_inside_their_graph(batch):
-    torch.manual_seed(1)
     bidx = batch.batch
-    ei = shuffle_edges_within_graph(batch.edge_index, bidx, batch.ptr)
+    ei = shuffle_edges_within_graph(batch.edge_index, bidx, batch.ptr, seed=1, graph_ids=batch.idx)
     assert ei.shape == batch.edge_index.shape
     assert torch.equal(ei[0], batch.edge_index[0])
     assert torch.equal(bidx[ei[0]], bidx[ei[1]])
+    # deterministic per (seed, graph id); different seed -> different destinations
+    ei2 = shuffle_edges_within_graph(batch.edge_index, bidx, batch.ptr, seed=1, graph_ids=batch.idx)
+    assert torch.equal(ei, ei2)
+    ei3 = shuffle_edges_within_graph(batch.edge_index, bidx, batch.ptr, seed=2, graph_ids=batch.idx)
+    assert not torch.equal(ei, ei3)
+    # the same graph gets the same shuffle regardless of its position in the batch
+    single = Batch.from_data_list([_graph(9, 2, 1)])
+    e_single = shuffle_edges_within_graph(single.edge_index, single.batch, single.ptr, seed=1, graph_ids=single.idx)
+    sel = bidx[batch.edge_index[0]] == 1
+    assert torch.equal(ei[1][sel] - batch.ptr[1], e_single[1])
+
+
+def test_shuffle_edges_model_is_deterministic_in_eval(batch):
+    m = build_model("graph_only", DEV, hidden_dim=16, num_rgcn_layers=1, ablation="shuffle_edges", seed=5)
+    m.eval()
+    with torch.no_grad():
+        a, b = m(batch), m(batch)
+    assert torch.allclose(a, b)
 
 
 def test_codebert_pooler_frozen_and_last_two_layers_trainable():

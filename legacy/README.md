@@ -8,3 +8,5 @@ imported by the corrected pipeline and are not maintained:
 - `scripts/visualize_attn_norms.py`, `scripts/compare_attn_norms.py`: attention-norm analysis
   written against the old `BertRGCN(gated_graph_conv_args, ...)` constructor.
 - `tests_old/`: ad-hoc inspection scripts (not pytest tests).
+- `utils/validate/`: graph / code visualisation helpers (need networkx and pyvis, which are not in
+  requirements.txt); not used by the pipeline.

@@ -1,6 +1,6 @@
 """Regression test on a real export of joern/graph-for-funcs.sc (Joern v4.0.400) over
 tests/fixtures/joern_inputs written through utils.data.datamanager.to_files
-(6 C files as .c, 6 C++ files as .cpp)."""
+(5 files written as .c and 7 as .cpp; 101.cpp is a bare constructor-initialiser fragment that the C++ hint regex classifies as C++)."""
 import json
 import os
 from pathlib import Path
