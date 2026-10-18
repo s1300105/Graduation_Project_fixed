@@ -205,8 +205,42 @@ def train_val_test_split_df(df, idcol='new_id', labelcol='vul'):
     return df
 
 
+def split_dataframe(df, mode: str = "random", idcol: str = "idx", labelcol: str = "target",
+                    groupcol: str = "project", seed: int = 42):
+    """Add a ``partition`` column (train/valid/test, 80/10/10).
+
+    mode="random"  : stratified random split at function level (as in the thesis).
+    mode="project" : every project goes to exactly one split (GroupShuffleSplit),
+                     i.e. a cross-project evaluation; sizes are approximate and
+                     the positive rate is reported per split.
+    """
+    if mode == "random":
+        return train_val_test_split_df(df, idcol=idcol, labelcol=labelcol)
+    if mode != "project":
+        raise ValueError(mode)
+    from sklearn.model_selection import GroupShuffleSplit
+    if groupcol not in df.columns:
+        raise ValueError(f"column {groupcol!r} needed for a project split")
+    groups = df[groupcol].fillna("<none>").astype(str).values
+    idx = np.arange(len(df))
+    gss1 = GroupShuffleSplit(n_splits=1, test_size=0.2, random_state=seed)
+    tr, rest = next(gss1.split(idx, groups=groups))
+    gss2 = GroupShuffleSplit(n_splits=1, test_size=0.5, random_state=seed)
+    va_rel, te_rel = next(gss2.split(rest, groups=groups[rest]))
+    part = np.empty(len(df), dtype=object)
+    part[tr] = "train"; part[rest[va_rel]] = "valid"; part[rest[te_rel]] = "test"
+    df = df.copy()
+    df["partition"] = part
+    for name in ("train", "valid", "test"):
+        sub = df[df.partition == name]
+        print(f"[project split] {name}: {len(sub)} rows, {sub[groupcol].nunique()} projects, "
+              f"positive rate {sub[labelcol].mean():.4f}")
+    assert not (set(df[df.partition == "train"][groupcol]) & set(df[df.partition == "test"][groupcol]))
+    return df
+
+
 # =====================================================================
-# ここから本題：MSR_data_cleaned.csv を JSONL (idx, func, target) に変換
+# ここから本題：MSR_data_cleaned.csv を JSONL (idx, func, target, project, commit_id, lang) に変換
 # =====================================================================
 
 def cleaned_code(func_code: str) -> str:
@@ -240,6 +274,9 @@ def main():
         default="data/processed/bigvul_defect.jsonl",
         help="出力する JSONL ベースパス（_train/_valid/_test が付きます）",
     )
+    parser.add_argument("--split", choices=["random", "project"], default="random",
+                        help="random = stratified function-level split (thesis); project = cross-project split")
+    parser.add_argument("--seed", type=int, default=42)
     args = parser.parse_args()
 
     input_path = Path(args.input_csv)
@@ -310,7 +347,7 @@ def main():
     # ============================================================
     print("Splitting into train/valid/test ...")
     # ここで idcol="idx", labelcol="target" を指定して再利用
-    df = train_val_test_split_df(df, idcol="idx", labelcol="target")
+    df = split_dataframe(df, mode=args.split, idcol="idx", labelcol="target", groupcol="project", seed=args.seed)
 
     df_train = df[df["partition"] == "train"].copy()
     df_valid = df[df["partition"] == "valid"].copy()
@@ -338,6 +375,9 @@ def main():
                     "func": row["func"],
                     "target": int(row["target"]),
                 }
+                for col in ("project", "commit_id", "lang", "CWE ID", "CVE ID"):
+                    if col in row.index and pd.notna(row[col]):
+                        obj[col.replace(" ", "_").lower()] = str(row[col])
                 f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
     write_split(df_train, train_path)
