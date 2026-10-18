@@ -84,23 +84,42 @@ def slice_frame(data_frame: pd.DataFrame, size:int):
     data_frame_size = len(data_frame)
     return data_frame.groupby(np.arange(data_frame_size) // size)
 
+_STRIP_RE = re.compile(r'"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\'|//[^\n]*|/\*.*?\*/', re.S)
+
+# C++-only constructs; checked on code with string / char literals and comments removed.
+# Deliberately conservative: a C function that is written as .cpp parses fine with the
+# C++ frontend unless it uses C++ keywords as identifiers, so only unambiguous hints count.
 _CPP_HINTS = re.compile(
-    r"::|\bthis->|\btemplate\s*<|\boperator\s*[^\s(]|\bnew\s+[A-Za-z_]|\bdelete\b|"
-    r"\bclass\s+[A-Za-z_]\w*\s*[:{]|\bnamespace\b|\bvirtual\b|\bnullptr\b|"
-    r"\bstd::|\btry\s*\{|\bcatch\s*\(|\bconst_cast\b|\bstatic_cast\b|\breinterpret_cast\b|"
-    r"^\s*[A-Za-z_~][\w:~]*\s*\([^;{]*\)\s*(const\s*)?:\s*[A-Za-z_]\w*\s*\("   # ctor initialiser list
-    , re.M)
+    r"::"                                              # scope resolution
+    r"|\bthis->"
+    r"|\btemplate\s*<"
+    r"|\boperator\s*(?:\(\)|\[\]|[-+*/%^&|~!=<>]+)\s*\("   # operator overload definition / call
+    r"|\bnew\s+[A-Za-z_][\w:<>]*\s*[\(\[;]"      # new Type( / new Type[ / new Type;
+    r"|\bdelete\s*(?:\[\])?\s*[A-Za-z_]\w*\s*;"  # delete p; / delete[] p;
+    r"|\bclass\s+[A-Za-z_]\w*\s*[:{]"
+    r"|\bnamespace\s+[A-Za-z_]\w*\s*\{"
+    r"|\bvirtual\s+[A-Za-z_~]"
+    r"|\bnullptr\b"
+    r"|\b(?:static|const|reinterpret|dynamic)_cast\s*<"
+    r"|\btry\s*\{|\bcatch\s*\("
+    r"|\A\s*[A-Za-z_~][\w:~]*\s*\([^;{\n]*\)\s*(?:const\s*)?:\s*[A-Za-z_]\w*\s*\("  # ctor initialiser list at function start
+)
+
+
+def looks_like_cpp(code: str) -> bool:
+    return bool(_CPP_HINTS.search(_STRIP_RE.sub('""', code or "")))
 
 
 def guess_extension(code: str, lang: str | None = None) -> str:
-    """Pick .c or .cpp so that Joern's frontend parses C++ as C++ (audit M21)."""
+    """Pick .c or .cpp so that Joern's frontend parses C++ as C++ (audit M21).
+    The ``lang`` column wins when present; otherwise C++-only syntax decides."""
     if isinstance(lang, str):
         l = lang.strip().lower()
         if l in {"cpp", "c++", "cxx", "cc"}:
             return ".cpp"
         if l == "c":
             return ".c"
-    return ".cpp" if _CPP_HINTS.search(code or "") else ".c"
+    return ".cpp" if looks_like_cpp(code) else ".c"
 
 
 def to_files(data_frame: pd.DataFrame, out_path):

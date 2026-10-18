@@ -559,8 +559,26 @@ def embed_generate(args):
         shutil.rmtree(input_dir)
     input_dir.mkdir(parents=True, exist_ok=True)
     done = {p.name.replace("_input.pkl", "") for p in input_dir.glob("*_input.pkl")}
-    counts = {"rows": 0, "graphs": 0, "rows_without_graph": 0, "rows_with_extra_graphs": 0,
-              "node_counts": [], "edge_counts": []}
+    settings = {"reverse_edges": bool(args.reverse_edges), "max_nodes": int(args.max_nodes),
+                "node_embedding": args.node_embedding, "node_max_len": int(args.node_max_len),
+                "node_code_mode": args.node_code_mode}
+    manifest_path = input_dir / "manifest.json"
+    counts = {"rows": 0, "graphs": 0, "rows_without_graph": 0, "rows_with_extra_graphs": 0}
+    node_sum = edge_sum = 0
+    counts_cover = "all"
+    if args.resume:
+        if manifest_path.exists():
+            prev = json.loads(manifest_path.read_text())
+            for k, v in settings.items():
+                if prev.get(k) != v:
+                    raise RuntimeError(f"--resume with a different setting ({k}: stored {prev.get(k)!r}, now {v!r}); "
+                                       f"delete {input_dir} or rerun without --resume")
+            counts.update({k: int(prev.get("counts", {}).get(k, 0)) for k in counts})
+            node_sum, edge_sum = int(prev.get("node_sum", 0)), int(prev.get("edge_sum", 0))
+            counts_cover = prev.get("counts_cover", "all")
+        elif done:
+            print("[WARN] --resume without a previous manifest: counts will cover this invocation only")
+            counts_cover = "this_invocation"
     for pkl in sorted(cpg_dir.glob("*_cpg.pkl")):
         base = pkl.name.replace("_cpg.pkl", "")
         if args.resume and base in done:
@@ -579,28 +597,28 @@ def embed_generate(args):
             nodes = funcs[0]
             g = nodes_to_input(nodes, row.target, args.max_nodes, mode=args.node_embedding,
                                reverse_edges=args.reverse_edges, max_len=args.node_max_len,
-                               code_mode=args.node_code_mode)
+                               code_mode=args.node_code_mode, max_cache=args.node_cache_size)
             g.func = row.func
             g.idx = int(row["idx"]) if "idx" in row and pd.notna(row["idx"]) else -1
             counts["graphs"] += 1
-            counts["node_counts"].append(int(g.num_nodes))
-            counts["edge_counts"].append(int(g.edge_index.size(1)))
+            node_sum += int(g.num_nodes)
+            edge_sum += int(g.edge_index.size(1))
             rows.append({"input": g, "target": int(row.target), "func": row.func, "idx": g.idx,
                          "commit_id": row.get("commit_id", None), "project": row.get("project", None)})
         out = pd.DataFrame(rows, columns=["input", "target", "func", "idx", "commit_id", "project"])
         dm.write(out, str(input_dir), f"{base}_input.pkl")
         del df
         gc.collect()
-    nc, ec = counts.pop("node_counts"), counts.pop("edge_counts")
     manifest = {
-        "reverse_edges": bool(args.reverse_edges),
+        **settings,
         "num_relations": NUM_RELATIONS * (2 if args.reverse_edges else 1),
-        "relations": list(RELATIONS), "node_feat_dim": 768, "max_nodes": args.max_nodes,
-        "node_embedding": args.node_embedding, "node_max_len": args.node_max_len,
-        "node_code_mode": args.node_code_mode, "counts": counts,
-        "nodes_mean": float(np.mean(nc)) if nc else None, "edges_mean": float(np.mean(ec)) if ec else None,
+        "relations": list(RELATIONS), "node_feat_dim": 768,
+        "counts": counts, "counts_cover": counts_cover, "node_sum": node_sum, "edge_sum": edge_sum,
+        "nodes_mean": node_sum / counts["graphs"] if counts["graphs"] else None,
+        "edges_mean": edge_sum / counts["graphs"] if counts["graphs"] else None,
+        "input_files": sorted(p.name for p in input_dir.glob("*_input.pkl")),
     }
-    (input_dir / "manifest.json").write_text(json.dumps(manifest, indent=1))
+    manifest_path.write_text(json.dumps(manifest, indent=1))
     print("[EMBED]", json.dumps(manifest))
 
 
@@ -634,6 +652,7 @@ def build_parser():
     p.add_argument("--max_nodes", type=int, default=500)
     p.add_argument("--node_embedding", choices=["codebert", "fast"], default="codebert")
     p.add_argument("--node_max_len", type=int, default=128)
+    p.add_argument("--node_cache_size", type=int, default=200_000, help="LRU size of the CODE-string -> CLS cache used at --embed time")
     p.add_argument("--node_code_mode", choices=["full", "first_line"], default="full",
                    help="CODE text embedded per node: full Joern CODE (thesis; container nodes carry the whole nested source) or its first line only")
     p.add_argument("--reverse_edges", action="store_true", help="add reversed edges as relations 3..5")

@@ -38,3 +38,13 @@ def test_codebert_node_features_shape_cache_and_code_modes(sample_nodes, monkeyp
     assert x2.shape == (75, 768)
     i_block = list(sample_nodes.values()).index(block)
     assert not np.allclose(x[i_block], x2[i_block])
+
+
+def test_cache_holds_owned_fp16_copies_and_is_bounded(sample_nodes, monkeypatch):
+    monkeypatch.delenv("USE_FAST_NODES_EMBEDDING", raising=False)
+    emb = E.NodesEmbedding(nodes_dim=500, mode="codebert", max_cache=20)
+    x = emb(sample_nodes).numpy()
+    assert x.shape == (75, 768)
+    assert len(emb._cache) == 20                                   # LRU bound respected
+    for v in emb._cache.values():
+        assert v.dtype == np.float16 and v.base is None and v.nbytes == 1536   # owned, not a view
