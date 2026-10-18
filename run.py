@@ -530,18 +530,57 @@ def cpg_generate(args):
             if not json_file:
                 stats["joern_failed_slices"] += 1
                 continue
-            graphs = cpgproc.json_process(str(cpg_dir), json_file, stats)
-            if not graphs:
-                print(f"[{split}] slice {s}: no graphs")
-                continue
+            graphs = cpgproc.json_process(str(cpg_dir), json_file, stats) or []
             right = pd.DataFrame(graphs, columns=["Index", "cpg"]).set_index("Index")
             left = slice_df.set_index("Index", drop=False)
             joined = left.join(right, how="inner")
-            dm.write(joined, str(cpg_dir), f"{stem}.pkl")
-            stats["graphs_written"] += len(joined)
             if not args.keep_intermediate:
                 for f in (cpg_dir / (stem + ".bin"), Path(json_file)):
                     f.unlink(missing_ok=True)
+
+            # --- rescue pass: functions Joern could not parse as written (macro signatures etc.) ---
+            if not args.no_rescue_macros:
+                lost = left.loc[~left.index.isin(joined.index)]
+                for stage in ("A", "B"):
+                    if lost.empty:
+                        break
+                    variants = {ix: dict(dm.rescue_variants(code)).get(stage) for ix, code in lost["func"].items()}
+                    variants = {ix: v for ix, v in variants.items() if v}
+                    if not variants:
+                        continue
+                    rescue_df = lost.loc[list(variants)].copy()
+                    rescue_df["func"] = pd.Series(variants)
+                    if args.normalize_graph_identifiers:
+                        rescue_df["func"] = rescue_df["func"].map(normalise_for_graph)
+                    shutil.rmtree(joern_dir, ignore_errors=True)
+                    dm.to_files(rescue_df, str(joern_dir))
+                    rstem = f"{stem}_rescue{stage}"
+                    try:
+                        cpgproc.joern_parse(args.joern_cli_dir, str(joern_dir), str(cpg_dir) + "/", rstem)
+                        rres = cpgproc.joern_create(args.joern_cli_dir, str(cpg_dir), str(cpg_dir), [rstem + ".bin"])
+                    except Exception as e:
+                        print(f"[WARN] rescue {stage} failed on {stem}: {e}")
+                        continue
+                    rjson = rres.get(rstem + ".bin")
+                    if rjson:
+                        rgraphs = cpgproc.json_process(str(cpg_dir), rjson, {}) or []
+                        rright = pd.DataFrame(rgraphs, columns=["Index", "cpg"]).set_index("Index")
+                        rjoined = lost.loc[lost.index.isin(rright.index)].join(rright, how="inner")  # keeps the ORIGINAL func text
+                        if len(rjoined):
+                            joined = pd.concat([joined, rjoined])
+                            stats[f"rescued_stage_{stage}"] = stats.get(f"rescued_stage_{stage}", 0) + len(rjoined)
+                            lost = lost.loc[~lost.index.isin(rjoined.index)]
+                        if not args.keep_intermediate:
+                            Path(rjson).unlink(missing_ok=True)
+                    if not args.keep_intermediate:
+                        (cpg_dir / (rstem + ".bin")).unlink(missing_ok=True)
+                joined = joined.sort_index()
+
+            if joined.empty:
+                print(f"[{split}] slice {s}: no graphs")
+                continue
+            dm.write(joined, str(cpg_dir), f"{stem}.pkl")
+            stats["graphs_written"] += len(joined)
         stats["rows_lost_in_joern"] = stats["rows_after_filter"] - stats["graphs_written"]
         if stats["rows_lost_in_joern"]:
             print(f"[WARN] {split}: {stats['rows_lost_in_joern']} of {stats['rows_after_filter']} functions produced no "
@@ -649,6 +688,8 @@ def build_parser():
     p.add_argument("--joern_cli_dir", default="joern/joern-cli/")
     p.add_argument("--normalize_graph_identifiers", action="store_true", help="apply FUN_i/VAR_j normalisation to the Joern input (thesis 3.2.2); text branch keeps raw code")
     p.add_argument("--keep_intermediate", action="store_true")
+    p.add_argument("--no_rescue_macros", action="store_true",
+                   help="do not retry Joern on functions whose signature it could not parse (default: retry with signature macros stripped; the text branch still sees the original code)")
     p.add_argument("--max_nodes", type=int, default=500)
     p.add_argument("--node_embedding", choices=["codebert", "fast"], default="codebert")
     p.add_argument("--node_max_len", type=int, default=128)

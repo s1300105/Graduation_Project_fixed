@@ -112,14 +112,65 @@ def looks_like_cpp(code: str) -> bool:
 
 def guess_extension(code: str, lang: str | None = None) -> str:
     """Pick .c or .cpp so that Joern's frontend parses C++ as C++ (audit M21).
-    The ``lang`` column wins when present; otherwise C++-only syntax decides."""
-    if isinstance(lang, str):
-        l = lang.strip().lower()
-        if l in {"cpp", "c++", "cxx", "cc"}:
-            return ".cpp"
-        if l == "c":
-            return ".c"
+
+    ``lang`` is only a positive hint: BigVul's lang column says "C" for most of
+    its C++ functions (only ~1.4% of rows are marked CPP although >10% of the
+    functions use C++ syntax), so a "C" label never overrides the syntax check."""
+    if isinstance(lang, str) and lang.strip().lower() in {"cpp", "c++", "cxx", "cc"}:
+        return ".cpp"
     return ".cpp" if looks_like_cpp(code) else ".c"
+
+
+# --- rescue of functions that Joern's C/C++ frontend cannot parse as written ---
+_ATTRIBUTE = re.compile(r"__attribute__\s*\(\(.*?\)\)", re.S)
+_DECLSPEC = re.compile(r"\b__declspec\s*\([^)]*\)")
+_DUNDER = re.compile(r"\b__[A-Za-z]\w*\b(?!\s*\()")                 # __init, __user, __must_check, __cold ...
+_CAPS_AFTER_PARAM = re.compile(r"(?<=[\w\]\)])\s+[A-Z][A-Z0-9_]{2,}\b(?=\s*[,\)\{;])")  # `int x UNUSED,`  `) OVERRIDE {`
+_CAPS_ANY = re.compile(r"\b[A-Z][A-Z0-9_]{2,}\b(?!\s*\()")
+_MACRO_SIGNATURE = re.compile(r"\A\s*(?:static\s+|inline\s+)*([A-Z][A-Z0-9_]{2,})\s*\((.*?)\)\s*(?=\{)", re.S)
+
+
+def _split_head(code: str):
+    i = code.find("{")
+    return (code, "") if i < 0 else (code[:i], code[i:])
+
+
+def strip_signature_macros(code: str, aggressive: bool = False) -> str:
+    """Return a variant of ``code`` whose signature is more likely to parse.
+
+    conservative: drop __attribute__((...)), __declspec(...), stand-alone dunder
+    tokens (__init, __user, ...) and ALL-CAPS tokens that sit after a parameter
+    or after the parameter list (UNUSED, OVERRIDE, ...).
+    aggressive: additionally drop every ALL-CAPS token in the signature that is
+    not a call, and turn a macro-shaped signature `PHP_FUNCTION(foo) {` into
+    `void PHP_FUNCTION_foo(void) {`.
+    Only the text before the first `{` is changed; the body is untouched."""
+    head, body = _split_head(code or "")
+    head = _ATTRIBUTE.sub(" ", head)
+    head = _DECLSPEC.sub(" ", head)
+    head = _DUNDER.sub(" ", head)
+    head = _CAPS_AFTER_PARAM.sub(" ", head)
+    if aggressive:
+        m = _MACRO_SIGNATURE.match(head + "{")
+        if m:
+            args = re.sub(r"[^A-Za-z0-9_]+", "_", m.group(2)).strip("_")
+            head = f"void {m.group(1)}_{args}(void) "
+        else:
+            head = _CAPS_ANY.sub(" ", head)
+    head = re.sub(r"[ \t]{2,}", " ", head)
+    return head + body
+
+
+def rescue_variants(code: str):
+    """Ordered list of (stage, text) to try after the original failed; identical
+    variants are dropped."""
+    out, seen = [], {code}
+    for stage, aggressive in (("A", False), ("B", True)):
+        v = strip_signature_macros(code, aggressive=aggressive)
+        if v not in seen:
+            seen.add(v)
+            out.append((stage, v))
+    return out
 
 
 def to_files(data_frame: pd.DataFrame, out_path):

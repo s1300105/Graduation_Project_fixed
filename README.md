@@ -41,7 +41,9 @@ HEAD にだけあった pre-GCN attention と 768 次元化は論文にないの
 
 - `pytest`（37 件、CPU）: 実パイプライン形式のサンプル `data/check_data/cpg_head_check.json` に対する辺種別の一致（Joern が出した 67 AST / 59 CFG / 37 PDG と完全一致）、`<global>` の除外、3 モデル種 × アブレーションの forward / backward、損失の式、ストリームの順序、2 seed × 3 設定の端から端までの学習・評価・再評価、分割スクリプト、Joern v4.0.400 の実出力（`tests/fixtures/joern_v4_export.json`）の読み込み。
 - Joern v4.0.400 を使って `tests/fixtures/joern_inputs/` の 12 関数で `run.py --cpg --embed --node_embedding fast` → `--mode train`（hybrid / graph_only、2 seed）→ `scripts/compare_runs.py` まで通した。12 ファイル中 7 件が `.cpp`（うち 101 は初期化子リストだけのコンストラクタ断片）、5 件が `.c` として書き出され、`CClient::ClearServerDependentCaps` が 80 ノード・AST 79 / CFG 64 / PDG 198 本の本物のグラフになる（元のコードでは 2 ノードの殻）。
-- **Joern で解析できない関数は除外される**（12 件中 2 件: クラス文脈のないコンストラクタ断片 `KillRing() : size(0), ...` と、シグネチャにマクロ `UNUSED` を含む関数）。元のコードはこれらを `<global>` の殻として学習に流していた。除外数は `data/cpg/cpg_manifest.json` の `rows_lost_in_joern` に出るので論文に書くこと。両腕とも同じ入力ファイルを読むので比較は対称。
+- **Joern で解析できない関数の扱い。** シグネチャのマクロ（`__init`、`__user`、`UNUSED`、`__attribute__((...))` など）で Joern が関数を認識できない場合、`--cpg` はシグネチャからマクロを除いた版で自動的に再投入する（救済パス。段階 A は控えめ、段階 B は積極的。本文は変えず、テキスト枝は元のコードを読む。`--no_rescue_macros` で無効化）。それでも落ちる関数（例: クラス文脈のないコンストラクタ断片）は除外される。件数は `data/cpg/cpg_manifest.json` の `rescued_stage_A` / `rescued_stage_B` / `rows_lost_in_joern` に出るので論文に書くこと。両腕とも同じ入力ファイルを読むので比較は対称。
+- **BigVul の `lang` 列は信頼しない。** 公開ミラーでは `CPP` と記録された行が 1.4% しかないのに、C++ 構文を含む関数は 10% 以上ある。`lang` は「C++ である」方向のヒントにだけ使い、`C` と書かれていても構文判定で C++ なら `.cpp` として Joern に渡す。
+- 落ちた関数の内訳は `python scripts/diagnose_joern_losses.py --split train --slice 0` で調べられる（落ちた関数を Joern に再投入し、「Joern がメソッドを出していない」か「出ているのに捨てている（バグ）」かを分類する）。
 - **未検証**: BigVul 全体での CPG 生成・学習（データと GPU が要る）。CodeBERT ノード埋め込み（`--node_embedding codebert`）は 75 ノードのサンプルに対するテスト（`tests/test_node_embedding_codebert.py`）のみで、全データでは未実行。
 
 ## 使い方（GPU マシンでの詳細手順は RUNBOOK_ja.md）

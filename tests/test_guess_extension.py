@@ -42,6 +42,8 @@ def test_cpp_code_is_detected(code):
     assert guess_extension(code) == ".cpp"
 
 
-def test_lang_column_wins():
+def test_lang_column_is_only_a_positive_hint():
     assert guess_extension("int f(void) { return 1; }", "CPP") == ".cpp"
-    assert guess_extension("void A::f() {}", "C") == ".c"
+    # BigVul marks most C++ functions as "C": the syntax check must still win
+    assert guess_extension("void A::f() {}", "C") == ".cpp"
+    assert guess_extension("int f(void) { return 1; }", "C") == ".c"

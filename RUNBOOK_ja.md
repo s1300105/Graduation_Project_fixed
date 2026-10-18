@@ -66,7 +66,8 @@ python -c "import json;print(json.dumps(json.load(open('data/cpg/cpg_manifest.js
 cat data/input/manifest.json
 ```
 
-  - `rows_lost_in_joern`: Joern で解析できず除外された関数数（論文に書く）
+  - `rows_lost_in_joern`: Joern で解析できず除外された関数数（論文に書く）。`rescued_stage_A` / `rescued_stage_B` はシグネチャのマクロを除いて救済できた件数
+  - 除外が多い（1 割超）ときは `python scripts/diagnose_joern_losses.py --split train --slice 0 --max 60` で内訳を見る（`method_dropped` が出たらパイプラインのバグなので報告）
   - `skipped_global`: `<global>` の除外数（0 でなければ修正が効いている）
   - `positives_after_filter`: 各分割の陽性数
   - `nodes_mean` / `edges_mean` / `num_relations`（3。`--reverse_edges` なら 6）
