@@ -690,6 +690,12 @@ def build_parser():
 
 
 def main(argv=None):
+    # long jobs are usually run with output redirected to a file: flush per line
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(line_buffering=True)
+        except Exception:
+            pass
     args = build_parser().parse_args(argv)
     for split in ("train", "valid", "test"):
         if getattr(args, f"{split}_jsonl") is None:

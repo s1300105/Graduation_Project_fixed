@@ -52,7 +52,7 @@ ls data/cleaned_data        # bigvul_train.jsonl / bigvul_valid.jsonl / bigvul_t
 
 ```bash
 mkdir -p logs
-nohup python run.py --cpg --embed --dataset bigvul > logs/cpg_embed.log 2>&1 &
+nohup python -u run.py --cpg --embed --dataset bigvul > logs/cpg_embed.log 2>&1 &   # -u: ログを即時に書く（git pull 後は不要）
 tail -f logs/cpg_embed.log
 ```
 
