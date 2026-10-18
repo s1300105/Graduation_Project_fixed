@@ -117,3 +117,4 @@ data/cpg/*.json
 !data/check_data/*.json
 joern/joern-cli/
 joern/joern-cli.zip
+workspace/

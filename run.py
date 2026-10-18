@@ -527,6 +527,10 @@ def cpg_generate(args):
             if not args.keep_intermediate:
                 for f in (cpg_dir / (stem + ".bin"), Path(json_file)):
                     f.unlink(missing_ok=True)
+        stats["rows_lost_in_joern"] = stats["rows_after_filter"] - stats["graphs_written"]
+        if stats["rows_lost_in_joern"]:
+            print(f"[WARN] {split}: {stats['rows_lost_in_joern']} of {stats['rows_after_filter']} functions produced no "
+                  f"parsable method in Joern (fragments / unsupported syntax) and are excluded from ALL models.")
         manifest["splits"][split] = stats
         print(f"[{split}] {stats}")
     shutil.rmtree(joern_dir, ignore_errors=True)

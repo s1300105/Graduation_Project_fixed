@@ -20,7 +20,8 @@ def joern_parse(joern_path, input_path, output_path, file_name, timeout_sec: int
     out_file = file_name + ".bin"
     joern_bin = Path(joern_path).expanduser().resolve() / "joern-parse"
     cmd = [str(joern_bin), str(Path(input_path).resolve()), "--output", str(Path(output_path).resolve() / out_file)]
-    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=timeout_sec)
+    res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True, timeout=timeout_sec,
+                         cwd=str(Path(output_path).resolve()))
     if res.stdout.strip():
         print(res.stdout.strip()[-2000:])
     return out_file
@@ -53,7 +54,8 @@ def joern_create(joern_path: str, in_path: str, out_path: str, cpg_files: list, 
                "--param", f"cpgFile={cpg_path}", "--param", f"outFile={json_out}"]
         print(f"[INFO] Running: {' '.join(cmd)}")
         try:
-            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout_sec)
+            # run inside out_dir so Joern's `workspace/` directory does not land in the repository
+            res = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=timeout_sec, cwd=str(out_dir))
         except subprocess.TimeoutExpired:
             print(f"[ERROR] Timeout after {timeout_sec}s: {cpg_file}")
             continue

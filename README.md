@@ -27,7 +27,7 @@ Vulnerability Detection」（R-GCN + CodeBERT, BigVul）の実装
 | M32 / M34 | アブレーションなし | `--model_type graph_only`、`--ablation shuffle_edges / no_gate / no_cls_skip / no_input_norm / no_residual` | `LMGNN.py` |
 | M36 / M37 | 数値・チェックポイントが残らない、test が別名のファイルを探す | run ごとに `runs/<name>/{args,metrics}.json, history.jsonl, best.pth, *_preds.npz, curves.png`。`--mode test --run_dir` | `run.py` |
 | M17 / M40 | `os.chdir('/home/yudai/...')`、requirements の欠落 | 絶対パス・import 時の副作用を全廃。requirements を実測版に更新 | `models/layers.py`, `requirements.txt` |
-| M39 | `graph-for-funcs.sc` が未コミット | 再構成版を同梱（**未検証**、下記） | `joern/graph-for-funcs.sc` |
+| M39 | `graph-for-funcs.sc` が未コミット | 再構成版を同梱。Joern v4.0.400 で実行し、出力を回帰テストの固定データにした | `joern/graph-for-funcs.sc`, `tests/test_joern_export.py` |
 | M23 | §3.2.2 の記号正規化が未適用 | `--normalize_graph_identifiers` でグラフ枝のみに適用可能（既定 off。正規表現ベースで壊れやすい） | `run.py` |
 | M26 | Joern 失敗時に `zip` がずれて空結合 | 出力を stem で対応づけ、失敗は manifest に計数 | `run.py`, `cpg_generator.py` |
 | M29 | 関数単位ランダム分割のみ | `make_bigvul_json.py --split project` でプロジェクト横断分割 | `data/scripts/make_bigvul_json.py` |
@@ -38,8 +38,10 @@ HEAD にだけあった pre-GCN attention と 768 次元化は論文にないの
 
 ## 検証済み / 未検証
 
-- `pytest tests/`（33 件、CPU）: 実パイプライン形式のサンプル `data/check_data/cpg_head_check.json` に対する辺種別の一致、`<global>` の除外、3 モデル種 × アブレーションの forward / backward、損失の式、ストリームの順序、2 seed × 3 設定の端から端までの学習・評価・再評価、分割スクリプト。
-- **未検証**: `joern/graph-for-funcs.sc`（この環境に Joern を入れられなかった）、BigVul 全体での CPG 生成・学習（データと GPU が要る）。Joern を動かしたら、`tests/fixtures/joern_inputs/` の 12 ファイルで `--cpg` を通し、`cpg_manifest.json` の `skipped_global` が 0 でないこと、C++ ファイルが `.cpp` で書き出されることを先に確認してください。
+- `pytest tests/`（36 件、CPU）: 実パイプライン形式のサンプル `data/check_data/cpg_head_check.json` に対する辺種別の一致（Joern が出した 67 AST / 59 CFG / 37 PDG と完全一致）、`<global>` の除外、3 モデル種 × アブレーションの forward / backward、損失の式、ストリームの順序、2 seed × 3 設定の端から端までの学習・評価・再評価、分割スクリプト、Joern v4.0.400 の実出力（`tests/fixtures/joern_v4_export.json`）の読み込み。
+- Joern v4.0.400 を使って `tests/fixtures/joern_inputs/` の 12 関数で `run.py --cpg --embed --node_embedding fast` → `--mode train`（hybrid / graph_only、2 seed）→ `scripts/compare_runs.py` まで通した。C++ の 6 関数は `.cpp` として書き出され、`CClient::ClearServerDependentCaps` が 80 ノード・AST 79 / CFG 64 / PDG 198 本の本物のグラフになる（元のコードでは 2 ノードの殻）。
+- **Joern で解析できない関数は除外される**（12 件中 2 件: クラス文脈のないコンストラクタ断片 `KillRing() : size(0), ...` と、シグネチャにマクロ `UNUSED` を含む関数）。元のコードはこれらを `<global>` の殻として学習に流していた。除外数は `data/cpg/cpg_manifest.json` の `rows_lost_in_joern` に出るので論文に書くこと。両腕とも同じ入力ファイルを読むので比較は対称。
+- **未検証**: BigVul 全体での CPG 生成・学習（データと GPU が要る）。CodeBERT ノード埋め込み（`--node_embedding codebert`）はクラス単体でテスト済みだが全データでは未実行。
 
 ## 使い方
 
@@ -52,7 +54,7 @@ pytest tests -q
 python data/scripts/make_bigvul_json.py --input_csv data/raw/MSR_data_cleaned.csv \
     --output_jsonl data/cleaned_data/bigvul.jsonl            # --split project でプロジェクト横断
 
-# 2. Joern（4.x）を joern/joern-cli/ に置く（joern/joern-install.sh --install-dir=joern）
+# 2. Joern 4.x を joern/joern-cli/ に置く（検証に使ったのは v4.0.400: github.com/joernio/joern/releases/download/v4.0.400/joern-cli.zip）
 
 # 3. CPG と埋め込み
 python run.py --cpg --embed --dataset bigvul                 # --reverse_edges で逆関係を追加
