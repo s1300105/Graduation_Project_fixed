@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 import numpy as np
 import os
@@ -83,12 +84,34 @@ def slice_frame(data_frame: pd.DataFrame, size:int):
     data_frame_size = len(data_frame)
     return data_frame.groupby(np.arange(data_frame_size) // size)
 
-def to_files(data_frame: pd.DataFrame, out_path):
-    os.makedirs(out_path, exist_ok=True)
+_CPP_HINTS = re.compile(
+    r"::|\bthis->|\btemplate\s*<|\boperator\s*[^\s(]|\bnew\s+[A-Za-z_]|\bdelete\b|"
+    r"\bclass\s+[A-Za-z_]\w*\s*[:{]|\bnamespace\b|\bvirtual\b|\bnullptr\b|"
+    r"\bstd::|\btry\s*\{|\bcatch\s*\(|\bconst_cast\b|\bstatic_cast\b|\breinterpret_cast\b|"
+    r"^\s*[A-Za-z_~][\w:~]*\s*\([^;{]*\)\s*(const\s*)?:\s*[A-Za-z_]\w*\s*\("   # ctor initialiser list
+    , re.M)
 
+
+def guess_extension(code: str, lang: str | None = None) -> str:
+    """Pick .c or .cpp so that Joern's frontend parses C++ as C++ (audit M21)."""
+    if isinstance(lang, str):
+        l = lang.strip().lower()
+        if l in {"cpp", "c++", "cxx", "cc"}:
+            return ".cpp"
+        if l == "c":
+            return ".c"
+    return ".cpp" if _CPP_HINTS.search(code or "") else ".c"
+
+
+def to_files(data_frame: pd.DataFrame, out_path):
+    """Write one source file per row, named by the row index, with an
+    extension chosen from the ``lang`` column when present or from C++ syntax
+    hints otherwise."""
+    os.makedirs(out_path, exist_ok=True)
+    has_lang = "lang" in data_frame.columns
     for idx, row in data_frame.iterrows():
-        file_name = f"{idx}.c"
-        fp = os.path.join(out_path, file_name)
+        ext = guess_extension(row.func, row["lang"] if has_lang else None)
+        fp = os.path.join(out_path, f"{idx}{ext}")
         with open(fp, 'w', encoding='utf-8') as f:
             f.write(row.func)
 
@@ -176,6 +199,8 @@ def loads(data_sets_dir, ratio=1):
     return dataset
 
 def tokenize(data_frame: pd.DataFrame):
+    """Legacy FUN_i/VAR_j tokeniser output. Not used by the pipeline (the
+    thesis-era code wrote tokens.pkl and never read it, audit M23)."""
     data_frame["tokens"] = data_frame["func"].apply(parse.tokenizer)
     return data_frame[["tokens", "func"]]
 
