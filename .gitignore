@@ -106,3 +106,14 @@ data/cpg_dataset_verifier_eb96b0.ipynb
 data/inspect/*.json
 data/inspect/
 data/*.ipynb
+
+# ===============================
+# corrected pipeline outputs
+# ===============================
+runs/
+data/joern_tmp/
+data/cpg/*.bin
+data/cpg/*.json
+!data/check_data/*.json
+joern/joern-cli/
+joern/joern-cli.zip
