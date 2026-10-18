@@ -44,7 +44,7 @@ HEAD にだけあった pre-GCN attention と 768 次元化は論文にないの
 - **Joern で解析できない関数は除外される**（12 件中 2 件: クラス文脈のないコンストラクタ断片 `KillRing() : size(0), ...` と、シグネチャにマクロ `UNUSED` を含む関数）。元のコードはこれらを `<global>` の殻として学習に流していた。除外数は `data/cpg/cpg_manifest.json` の `rows_lost_in_joern` に出るので論文に書くこと。両腕とも同じ入力ファイルを読むので比較は対称。
 - **未検証**: BigVul 全体での CPG 生成・学習（データと GPU が要る）。CodeBERT ノード埋め込み（`--node_embedding codebert`）は 75 ノードのサンプルに対するテスト（`tests/test_node_embedding_codebert.py`）のみで、全データでは未実行。
 
-## 使い方
+## 使い方（GPU マシンでの詳細手順は RUNBOOK_ja.md）
 
 ```bash
 python -m venv venv && . venv/bin/activate
