@@ -9,8 +9,12 @@ functions of that slice that have no row in the cpg pickle, summarises them
 (language, project, length, signature shape) and re-runs Joern on up to --max
 of them to classify each loss:
 
-  no_method        Joern produced only the <global> pseudo-method (parse failure)
-  method_dropped   Joern produced a real method but the pipeline did not keep it (pipeline bug)
+  parses_now       with the CURRENT pipeline settings Joern produces a real method and
+                   json_process keeps it: the original run lost it because the code or
+                   settings differed then (e.g. extension choice before the lang fix)
+  rescued_A/B      only parses after the macro-stripping rescue pass (stage A / B)
+  no_method        Joern produces only the <global> pseudo-method even after rescue
+  pipeline_bug     Joern produced a real method but json_process dropped it -> report
   joern_failed     joern-parse / export failed for the whole batch
 
 Writes <out>/losses.csv and prints a summary.
@@ -73,41 +77,76 @@ def replay_slice(jsonl_path, seed, max_chars, min_chars, slice_size, s):
     raise SystemExit(f"slice {s} not found")
 
 
-def rerun_joern(lost: pd.DataFrame, joern_cli_dir: str, out_dir: Path):
-    work = out_dir / "joern_rerun"
+def _joern_pass(df: pd.DataFrame, joern_cli_dir: str, work: Path, tag: str):
+    """Write df.func through to_files, run Joern, return ({stem: [methods]}, {stem: filename}, kept_idx)."""
     if work.exists():
         shutil.rmtree(work)
     src = work / "src"
-    dm.to_files(lost, str(src))
+    dm.to_files(df, str(src))
     written = {p.stem: p.name for p in src.iterdir()}
     cpg_dir = work / "cpg"
     cpg_dir.mkdir(parents=True)
     try:
-        cp.joern_parse(joern_cli_dir, str(src), str(cpg_dir) + "/", "rerun_cpg")
+        cp.joern_parse(joern_cli_dir, str(src), str(cpg_dir) + "/", f"{tag}_cpg")
+        res = cp.joern_create(joern_cli_dir, str(cpg_dir), str(cpg_dir), [f"{tag}_cpg.bin"])
     except Exception as e:
-        print(f"[joern-parse FAILED] {e}")
-        return {k: ("joern_failed", "", "") for k in written}, written
-    res = cp.joern_create(joern_cli_dir, str(cpg_dir), str(cpg_dir), ["rerun_cpg.bin"])
-    jf = res.get("rerun_cpg.bin")
+        print(f"[joern FAILED in {tag}] {e}")
+        return None, written, set()
+    jf = res.get(f"{tag}_cpg.bin")
     if not jf:
-        return {k: ("joern_failed", "", "") for k in written}, written
+        return None, written, set()
     raw = json.loads(re.sub(r"io\.shiftleft\.codepropertygraph\.generated\.", "", Path(jf).read_text(encoding="utf-8")))
     by_file = collections.defaultdict(list)
     for m in raw["functions"]:
         f = str(m.get("file") or "")
         if f and f != "N/A" and not f.startswith("<"):
             by_file[Path(f).stem].append(m)
-    verdict = {}
+    kept_idx = {idx for idx, _ in (cp.json_process(str(cpg_dir), jf, {}) or [])}
+    return by_file, written, kept_idx
+
+
+def rerun_joern(lost: pd.DataFrame, joern_cli_dir: str, out_dir: Path):
+    verdict, written_all = {}, {}
+    by_file, written, kept = _joern_pass(lost, joern_cli_dir, out_dir / "joern_rerun", "rerun")
+    written_all.update(written)
+    if by_file is None:
+        return {k: ("joern_failed", "", "") for k in written}, written_all
+    pending = {}
     for stem in written:
         methods = by_file.get(stem, [])
         real = [m for m in methods if not cp.is_global_method(m)]
         glob = [m for m in methods if cp.is_global_method(m)]
-        if real:
-            verdict[stem] = ("method_dropped", ";".join(m["function"][:40] for m in real[:3]), "")
+        names = ";".join(m["function"][:40] for m in real[:3])
+        labels = ",".join(f"{k}:{v}" for k, v in collections.Counter(
+            n.get("label") for m in glob for n in m.get("nodes", [])).most_common(4))
+        if real and int(stem) in kept:
+            verdict[stem] = ("parses_now", names, "")
+        elif real:
+            verdict[stem] = ("pipeline_bug", names, labels)
         else:
-            labels = collections.Counter(n.get("label") for m in glob for n in m.get("nodes", []))
-            verdict[stem] = ("no_method", "", ",".join(f"{k}:{v}" for k, v in labels.most_common(4)))
-    return verdict, written
+            pending[stem] = labels
+    # rescue passes on what is still lost
+    for stage in ("A", "B"):
+        if not pending:
+            break
+        rows = lost.loc[[int(s) for s in pending]].copy()
+        variants = {ix: dict(dm.rescue_variants(code)).get(stage) for ix, code in rows["func"].items()}
+        variants = {ix: v for ix, v in variants.items() if v}
+        if not variants:
+            continue
+        rows = rows.loc[list(variants)]
+        rows["func"] = pd.Series(variants)
+        by_file, _, kept = _joern_pass(rows, joern_cli_dir, out_dir / f"joern_rescue_{stage}", f"rescue{stage}")
+        if by_file is None:
+            continue
+        for stem in list(pending):
+            real = [m for m in by_file.get(stem, []) if not cp.is_global_method(m)]
+            if real and int(stem) in kept:
+                verdict[stem] = (f"rescued_{stage}", ";".join(m["function"][:40] for m in real[:3]), "")
+                pending.pop(stem)
+    for stem, labels in pending.items():
+        verdict[stem] = ("no_method", "", labels)
+    return verdict, written_all
 
 
 def main():
@@ -165,13 +204,16 @@ def main():
         sample["joern_methods"] = [verdict.get(str(i), ("", "", ""))[1] for i in sample.index]
         sample["global_labels"] = [verdict.get(str(i), ("", "", ""))[2] for i in sample.index]
         print(f"\n-- Joern re-run on {len(sample)} lost functions:", dict(sample.verdict.value_counts()))
-        md = sample[sample.verdict == "method_dropped"]
-        if len(md):
-            print("   !! method_dropped means the pipeline discarded a real method -> report these (pipeline bug):")
-            print(md[["idx", "file", "joern_methods"]].head(10).to_string(index=False))
+        print("   parses_now / rescued_* = recovered by the current pipeline settings (extension fix, macro rescue)")
+        bug = sample[sample.verdict == "pipeline_bug"]
+        if len(bug):
+            print("   !! pipeline_bug: Joern produced a real method but json_process dropped it -> report these:")
+            print(bug[["idx", "file", "joern_methods", "global_labels"]].head(10).to_string(index=False))
         nm = sample[sample.verdict == "no_method"]
         if len(nm):
-            print("   no_method = Joern parsed only <global>; shapes:", dict(nm["shape"].value_counts()))
+            print("   no_method = only <global> even after rescue; shapes:", dict(nm["shape"].value_counts()))
+            for fl in nm.first_line.head(8):
+                print("      ", fl[:110])
         sample.drop(columns=["func", "cpg"], errors="ignore").to_csv(out / "losses.csv", index=False)
         print(f"\nwrote {out/'losses.csv'}")
     else:
