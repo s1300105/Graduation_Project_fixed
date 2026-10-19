@@ -51,6 +51,26 @@ def test_global_functions_are_skipped():
             assert len(funcs) == 1
 
 
+def test_global_rows_parse_when_asked_to():
+    """skip_global=False (whole_file unit): a <global> pseudo-method parses into an
+    ordinary node dict whose METHOD nodes include the file's functions."""
+    for r in _rows():
+        f = r["cpg"]["functions"][0]
+        if not is_global_function(f):
+            continue
+        funcs = parse_to_functions(r["cpg"], max_nodes=500, skip_global=False)
+        assert len(funcs) == 1
+        od = funcs[0]
+        labels = {n.label for n in od.values()}
+        assert {"METHOD", "METHOD_RETURN", "BLOCK"} <= labels and "UNKNOWN" not in labels
+        assert all(n.label_id != NODE_LABEL_TO_ID["<UNK>"] for n in od.values())
+        assert any(n.label == "METHOD" and n.code and not n.code.startswith("<") for n in od.values())
+        rel = count_edges_by_relation(od)
+        assert rel["AST"] > 0 and rel["CFG"] > 0
+        g = nodes_to_input(od, r["target"], 500, mode="fast")
+        assert g.x.shape == (len(od), 768) and g.num_nodes == len(od)
+
+
 def test_edge_relations_match_joern_exactly():
     """Every produced (src, dst, relation) must be a Joern edge of that type and vice versa."""
     for r in _rows():

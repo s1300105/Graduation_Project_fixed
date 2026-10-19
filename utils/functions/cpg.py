@@ -12,6 +12,19 @@ Fixed relative to the thesis code (see audit M19 / M20 / M22 / M25):
     model can embed it instead of a one-bit regex flag;
   * both the legacy layout (``AST`` / ``CFG`` / ``PDG`` node lists) and a
     flat ``nodes`` + ``edges`` layout are accepted.
+
+Whole-file graphs (``graph_unit="whole_file"`` in cpg_generator.json_process):
+the entry then holds the file's ``<file>:<global>`` pseudo-method and the
+caller passes ``skip_global=False`` to ``parse_to_functions``. Such a graph
+parses into an ordinary node dict: the METHOD node's CODE is ``<global>``, the
+BLOCK node's CODE is the whole file (left as is; embeddings.node_code_text
+decides what CodeBERT sees), the file's functions are AST children of that
+BLOCK, global LOCALs and their initialisers sit between them, and UNKNOWN /
+COMMENT nodes are dropped by ``filter_nodes`` as for any method. Note that the
+``max_nodes`` cap in ``order_nodes`` truncates by source position (line,
+column), so in whole_file mode the LAST functions of the file are cut first,
+``main`` included when it comes last; callers should raise ``--max_nodes`` for
+whole-program datasets and watch the number of truncated graphs.
 """
 from collections import OrderedDict
 import re

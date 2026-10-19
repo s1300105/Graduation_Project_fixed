@@ -1,6 +1,9 @@
-"""C / C++ detection used to name Joern input files when the jsonl has no lang column."""
+"""C / C++ detection used to name Joern input files when the jsonl has no lang column,
+and the explicit `ext` column that whole-program datasets use instead."""
+import numpy as np
+import pandas as pd
 import pytest
-from utils.data.datamanager import guess_extension, looks_like_cpp
+from utils.data.datamanager import guess_extension, looks_like_cpp, to_files
 
 C_PROBES = [
     'void f(void) { printf("a::b %s", x); }',                       # :: inside a string literal
@@ -47,3 +50,49 @@ def test_lang_column_is_only_a_positive_hint():
     # BigVul marks most C++ functions as "C": the syntax check must still win
     assert guess_extension("void A::f() {}", "C") == ".cpp"
     assert guess_extension("int f(void) { return 1; }", "C") == ".c"
+
+
+# --- to_files: explicit `ext` column vs the guessed extension ----------------------------
+
+def _names(d):
+    return sorted(p.name for p in d.iterdir())
+
+
+def test_to_files_without_ext_column_guesses_from_lang_and_syntax(tmp_path):
+    df = pd.DataFrame({"func": ["int f(void) { return 1; }", "void A::f() {}", "int g(void) { return 2; }"],
+                       "lang": ["C", "C", "CPP"]}, index=[5, 6, 7])
+    to_files(df, str(tmp_path))
+    assert _names(tmp_path) == ["5.c", "6.cpp", "7.cpp"]
+    assert (tmp_path / "6.cpp").read_text(encoding="utf-8") == "void A::f() {}"
+    d2 = tmp_path / "nolang"
+    to_files(df.drop(columns=["lang"]), str(d2))
+    assert _names(d2) == ["5.c", "6.cpp", "7.c"]                 # no lang: syntax hints only
+
+
+def test_to_files_uses_the_ext_column_when_it_is_a_string(tmp_path):
+    # a K&R C program that looks_like_cpp would never flag, forced to .c; modern C++ without any
+    # of the C++ hint constructs (cin/cout only) forced to .cpp; a C++-looking function forced to .c
+    df = pd.DataFrame({"func": ["main()\n{\n}", "#include <iostream>\nusing namespace std;\nint main() { cin >> x; }",
+                                "void A::f() {}"],
+                       "ext": [".c", ".cpp", ".c"], "lang": ["CPP", "C", "C"]}, index=[1, 2, 3])
+    to_files(df, str(tmp_path))
+    assert _names(tmp_path) == ["1.c", "2.cpp", "3.c"]           # ext wins over lang and over the syntax check
+
+
+def test_to_files_falls_back_per_row_when_ext_is_null(tmp_path):
+    df = pd.DataFrame({"func": ["void A::f() {}", "int f(void) { return 1; }", "int g(void) { return 1; }"],
+                       "ext": [None, np.nan, ".cpp"]}, index=[1, 2, 3])
+    to_files(df, str(tmp_path))
+    assert _names(tmp_path) == ["1.cpp", "2.c", "3.cpp"]
+    df2 = pd.DataFrame({"func": ["int f(void) { return 1; }"], "ext": pd.Series([pd.NA], dtype="string")}, index=[9])
+    to_files(df2, str(tmp_path / "na"))
+    assert _names(tmp_path / "na") == ["9.c"]
+
+
+def test_to_files_rejects_unknown_extensions(tmp_path):
+    df = pd.DataFrame({"func": ["int f(void) { return 1; }"], "ext": [".cc"]}, index=[1])
+    with pytest.raises(ValueError):
+        to_files(df, str(tmp_path))
+    df = pd.DataFrame({"func": ["int f(void) { return 1; }"], "ext": ["c"]}, index=[1])
+    with pytest.raises(ValueError):
+        to_files(df, str(tmp_path))

@@ -161,26 +161,94 @@ def strip_signature_macros(code: str, aggressive: bool = False) -> str:
     return head + body
 
 
+# --- stage C: lowercase signature macros that stages A / B never touch ---
+# Joern's C frontend treats an unknown lowercase token between the storage class and
+# the return type (or between the return type and the name) as a parse error and
+# emits no METHOD at all. Stages A / B only remove dunder and ALL-CAPS tokens, so
+# every FFmpeg (av_cold, av_always_inline, ...), QEMU (coroutine_fn) and APR
+# (APR_INLINE, APR_DECLARE(type)) function with such a macro was lost: 4.5% of the
+# CodeXGLUE defect-detection functions and 5.5% of the D2A sample in the probe.
+# Reviewable / extendable lists; a token is only removed from the head (before the
+# first `{`).
+LOWERCASE_SIGNATURE_MACROS = (
+    # FFmpeg / libav (libavutil/attributes.h, internal.h)
+    "av_cold", "av_hot", "av_always_inline", "av_extern_inline", "av_noinline", "av_unused", "av_used",
+    "av_const", "av_pure", "av_flatten", "av_alias", "av_warn_unused_result", "av_noreturn",
+    "attribute_align_arg", "attribute_deprecated",
+    # QEMU
+    "coroutine_fn", "coroutine_mixed_fn", "always_inline", "never_inline",
+    # Apache Portable Runtime
+    "APR_INLINE", "APR_THREAD_FUNC", "APR_DECLARE_DATA",
+)
+# macros that take an argument list, e.g. av_printf_format(3, 4) / G_GNUC_PRINTF(1, 2)
+LOWERCASE_SIGNATURE_MACROS_WITH_ARGS = (
+    "av_printf_format", "av_scanf_format", "av_uninit",
+)
+# G_GNUC_PRINTF(1, 2), G_GNUC_WARN_UNUSED_RESULT, G_GNUC_INTERNAL, ... (GLib)
+_GNUC_STYLE = r"G_GNUC_[A-Z0-9_]+"
+
+_LOWERCASE_MACRO_RE = re.compile(
+    r"\b(?:" + "|".join(map(re.escape, LOWERCASE_SIGNATURE_MACROS)) + r")\b(?!\s*\()"
+    r"|\b(?:" + "|".join(map(re.escape, LOWERCASE_SIGNATURE_MACROS_WITH_ARGS)) + r"|" + _GNUC_STYLE
+    + r")\b(?:\s*\([^()]*\))?"
+)
+# `APR_DECLARE(int) foo(` / `static APR_DECLARE_NONSTD(void *) foo(` -> `int foo(` / `static void * foo(`
+# The closing paren must be followed by the function name and its parameter list, so
+# a macro-shaped signature `PHP_FUNCTION(foo) {` is left to stage B's rewrite.
+_RETURN_TYPE_MACRO_RE = re.compile(
+    r"\A(\s*(?:(?:static|inline|extern|const)\s+)*)([A-Z][A-Z0-9_]{2,})\s*\(\s*([A-Za-z_][\w\s\*]*?)\s*\)"
+    r"(?=\s*\**\s*[A-Za-z_]\w*\s*\()"
+)
+
+RESCUE_STAGES = ("A", "B", "C")
+
+
+def strip_lowercase_signature_macros(code: str) -> str:
+    """Stage C pre-pass: drop the known lowercase signature macros from the head
+    and unwrap a return-type macro ``MACRO(type)`` at the start of the head.
+    Only the text before the first `{` is changed."""
+    head, body = _split_head(code or "")
+    head = _RETURN_TYPE_MACRO_RE.sub(lambda m: f"{m.group(1)}{m.group(3)} ", head, count=1)
+    head = _LOWERCASE_MACRO_RE.sub(" ", head)
+    head = re.sub(r"[ \t]{2,}", " ", head)
+    return head + body
+
+
 def rescue_variants(code: str):
     """Ordered list of (stage, text) to try after the original failed; identical
-    variants are dropped."""
+    variants are dropped. Stage C = the lowercase-macro pre-pass followed by
+    stage B's transformation; it is yielded only when it differs from stage B."""
     out, seen = [], {code}
-    for stage, aggressive in (("A", False), ("B", True)):
-        v = strip_signature_macros(code, aggressive=aggressive)
+    for stage in RESCUE_STAGES:
+        if stage == "C":
+            v = strip_signature_macros(strip_lowercase_signature_macros(code), aggressive=True)
+        else:
+            v = strip_signature_macros(code, aggressive=(stage == "B"))
         if v not in seen:
             seen.add(v)
             out.append((stage, v))
     return out
 
 
+_VALID_EXTS = (".c", ".cpp")
+
+
 def to_files(data_frame: pd.DataFrame, out_path):
-    """Write one source file per row, named by the row index, with an
-    extension chosen from the ``lang`` column when present or from C++ syntax
-    hints otherwise."""
+    """Write one source file per row, named by the row index. The extension is
+    the row's ``ext`` column when the frame has one and the value is a non-null
+    string ('.c' or '.cpp'; anything else raises); otherwise it is chosen from
+    the ``lang`` column when present or from C++ syntax hints (BigVul path,
+    unchanged)."""
     os.makedirs(out_path, exist_ok=True)
     has_lang = "lang" in data_frame.columns
+    has_ext = "ext" in data_frame.columns
     for idx, row in data_frame.iterrows():
-        ext = guess_extension(row.func, row["lang"] if has_lang else None)
+        ext = row["ext"] if has_ext else None
+        if isinstance(ext, str):
+            if ext not in _VALID_EXTS:
+                raise ValueError(f"row {idx}: ext must be one of {_VALID_EXTS}, got {ext!r}")
+        else:
+            ext = guess_extension(row.func, row["lang"] if has_lang else None)
         fp = os.path.join(out_path, f"{idx}{ext}")
         with open(fp, 'w', encoding='utf-8') as f:
             f.write(row.func)

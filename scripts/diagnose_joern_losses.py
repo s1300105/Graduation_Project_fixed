@@ -12,7 +12,8 @@ of them to classify each loss:
   parses_now       with the CURRENT pipeline settings Joern produces a real method and
                    json_process keeps it: the original run lost it because the code or
                    settings differed then (e.g. extension choice before the lang fix)
-  rescued_A/B      only parses after the macro-stripping rescue pass (stage A / B)
+  rescued_A/B/C    only parses after the macro-stripping rescue pass (stage A / B / C;
+                   C = lowercase signature macros such as av_cold / coroutine_fn)
   no_method        Joern produces only the <global> pseudo-method even after rescue
   pipeline_bug     Joern produced a real method but json_process dropped it -> report
   joern_failed     joern-parse / export failed for the whole batch
@@ -126,7 +127,7 @@ def rerun_joern(lost: pd.DataFrame, joern_cli_dir: str, out_dir: Path):
         else:
             pending[stem] = labels
     # rescue passes on what is still lost
-    for stage in ("A", "B"):
+    for stage in dm.RESCUE_STAGES:
         if not pending:
             break
         rows = lost.loc[[int(s) for s in pending]].copy()
