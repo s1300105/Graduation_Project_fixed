@@ -651,16 +651,35 @@ def normalise_for_graph(code: str) -> str:
     return "\n".join(clean_gadget(code.splitlines()))
 
 
+def _validate_ext_column(df: pd.DataFrame, path) -> None:
+    """A prepared jsonl may carry an ``ext`` column ('.c' / '.cpp' / null). Check it
+    before any Joern work (and before the old CPG directory is removed) so a mangled
+    column fails fast instead of mid-way through a multi-hour run."""
+    if "ext" not in df.columns:
+        return
+    vals = df["ext"]
+    bad = vals[vals.notna() & ~vals.isin(dm._VALID_EXTS)]
+    if len(bad):
+        raise ValueError(f"{path}: ext column holds {len(bad)} invalid value(s), e.g. {bad.iloc[0]!r}; "
+                         f"allowed: {dm._VALID_EXTS} or null")
+
+
 def cpg_generate(args):
     data_root = Path(args.data_root)
     cpg_dir, joern_dir = data_root / "cpg", data_root / "joern_tmp"
+    rescue_stages = tuple(st for st in dm.RESCUE_STAGES if st in args.rescue_stages)
+    # read and validate every split before touching the previous output
+    frames = []
+    for split, path in (("train", args.train_jsonl), ("valid", args.valid_jsonl), ("test", args.test_jsonl)):
+        df = read_jsonl(path)
+        _validate_ext_column(df, path)
+        frames.append((split, df))
     if cpg_dir.exists():
         shutil.rmtree(cpg_dir)
     cpg_dir.mkdir(parents=True)
     manifest = {"args": vars(args), "splits": {}}
     # --graph_unit whole_file keeps Joern's per-file <global> method (the whole program) per source file
-    for split, path in (("train", args.train_jsonl), ("valid", args.valid_jsonl), ("test", args.test_jsonl)):
-        df = read_jsonl(path)
+    for split, df in frames:
         n_in = len(df)
         df = df.sample(frac=1, random_state=args.seed).reset_index(drop=True)
         if args.max_chars:
@@ -673,6 +692,11 @@ def cpg_generate(args):
         stats = {"rows_in": n_in, "rows_after_filter": len(df), "positives_after_filter": int(df.target.sum()),
                  "label_counts": {str(k): int(v) for k, v in df.target.value_counts().sort_index().items()},
                  "slices": 0, "joern_failed_slices": 0, "graphs_written": 0}
+        if not args.no_rescue_macros:
+            for st in rescue_stages:
+                stats[f"rescued_stage_{st}"] = 0            # always present, so manifests are comparable
+            if args.graph_unit == "whole_file":
+                stats["rescue_skipped_whole_file"] = 0      # rows lost without a rescue attempt (see below)
         for s, slice_df in dm.slice_frame(df, args.slice_size):
             slice_df = slice_df.copy()
             slice_df["Index"] = slice_df.index
@@ -704,9 +728,15 @@ def cpg_generate(args):
                     f.unlink(missing_ok=True)
 
             # --- rescue pass: functions Joern could not parse as written (macro signatures etc.) ---
-            if not args.no_rescue_macros:
+            # The stages rewrite the text before the first `{` as a function signature; on a whole
+            # program that text is the #include / #define / global-declaration prologue, and stage B
+            # would strip its ALL-CAPS tokens (`#define MAXN 100` -> `#define 100`), so a "rescued" whole
+            # file would be a graph of a corrupted program. The pass is therefore skipped for whole_file.
+            if not args.no_rescue_macros and args.graph_unit == "whole_file":
+                stats["rescue_skipped_whole_file"] += int((~left.index.isin(joined.index)).sum())
+            elif not args.no_rescue_macros:
                 lost = left.loc[~left.index.isin(joined.index)]
-                for stage in dm.RESCUE_STAGES:
+                for stage in rescue_stages:
                     if lost.empty:
                         break
                     variants = {ix: dict(dm.rescue_variants(code)).get(stage) for ix, code in lost["func"].items()}
@@ -771,6 +801,16 @@ def embed_generate(args):
     node_sum = edge_sum = 0
     counts_cover = "all"
     cpg_files = sorted(cpg_dir.glob("*_cpg.pkl"))
+    if not cpg_files:
+        raise RuntimeError(f"no *_cpg.pkl under {cpg_dir}; run --cpg first")
+    cpg_manifest = cpg_dir / "cpg_manifest.json"
+    if cpg_manifest.exists():
+        stored_unit = json.loads(cpg_manifest.read_text()).get("args", {}).get("graph_unit", "first_method")
+        if stored_unit != args.graph_unit:
+            # with the wrong unit parse_to_functions returns [] for every row (whole_file CPGs hold only
+            # <global>) or records a unit the graphs do not have; both are silent, so refuse
+            raise RuntimeError(f"--embed --graph_unit {args.graph_unit} but {cpg_manifest} was generated with "
+                               f"--graph_unit {stored_unit}; pass the same value to --cpg and --embed")
     # label range over ALL cpg rows (also the ones --resume skips), before anything is written
     t_min, t_max = None, None
     for pkl in cpg_files:
@@ -832,6 +872,10 @@ def embed_generate(args):
         dm.write(out, str(input_dir), f"{base}_input.pkl")
         del df
         gc.collect()
+    if counts["graphs"] == 0:
+        raise RuntimeError(f"--embed produced no graph from {len(cpg_files)} cpg file(s) "
+                           f"(rows {counts['rows']}, rows_without_graph {counts['rows_without_graph']}); "
+                           f"check --graph_unit against {cpg_dir / 'cpg_manifest.json'}")
     manifest = {
         **settings,
         "num_relations": NUM_RELATIONS * (2 if args.reverse_edges else 1),
@@ -886,6 +930,10 @@ def build_parser():
     p.add_argument("--joern_cli_dir", default="joern/joern-cli/")
     p.add_argument("--normalize_graph_identifiers", action="store_true", help="apply FUN_i/VAR_j normalisation to the Joern input (thesis 3.2.2); text branch keeps raw code")
     p.add_argument("--keep_intermediate", action="store_true")
+    p.add_argument("--rescue_stages", default="ABC",
+                   help="rescue stages to try, in order, as letters (default ABC). Stage C (lowercase signature macros "
+                        "such as av_cold / coroutine_fn, return-type macros) was added after the first BigVul runs; "
+                        "pass AB to regenerate a BigVul CPG set with the earlier behaviour")
     p.add_argument("--no_rescue_macros", action="store_true",
                    help="do not retry Joern on functions whose signature it could not parse (default: retry with signature macros stripped; the text branch still sees the original code)")
     p.add_argument("--max_nodes", type=int, default=500)

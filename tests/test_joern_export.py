@@ -283,3 +283,48 @@ def test_whole_file_node_cap_cuts_later_functions_first():
     dropped_lines = [n.get_line_number() for nid, n in full.items() if nid not in cut and n.get_line_number() is not None]
     assert max(kept_lines) <= min(dropped_lines)
     assert not any(n.code.startswith("int main()") for n in cut.values())
+
+
+# ---------------------------------------------------------------------------------------
+# crafted export (Joern 4.0.400): same-stem 12.c (struct only) / 12.cpp (main), 13.c (#define only),
+# 14.cpp (namespace function, struct members named c / cpp, static helper, a lambda inside main, main),
+# 15.c (sq, main, function-like macro ADD), 16.cpp (K&R main written as .cpp), 17.c (global array only)
+# ---------------------------------------------------------------------------------------
+CRAFTED = ROOT / "tests" / "fixtures" / "joern_v4_export_crafted.json"
+
+
+def test_lambda_body_is_folded_into_the_whole_file_graph():
+    raw = json.loads(CRAFTED.read_text(encoding="utf-8"))["functions"]
+    lam = [m for m in raw if "<lambda>" in m["function"]]
+    assert len(lam) == 1 and lam[0]["file"] == "14.cpp" and len(lam[0]["nodes"]) == 13
+    assert cp.is_lambda_method(lam[0]) and not cp.is_macro_method(lam[0])
+    glob = next(m for m in raw if m["function"] == "14.cpp:<global>")
+    lam_ids = {n["id"] for n in lam[0]["nodes"]}
+    assert not (lam_ids & {n["id"] for n in glob["nodes"]})          # Joern: the body is NOT under <global>
+    stats = {}
+    kept = dict(cp.json_process(str(CRAFTED.parent), CRAFTED.name, stats, graph_unit="whole_file"))
+    g14 = kept[14]["functions"][0]
+    assert lam_ids <= {n["id"] for n in g14["nodes"]}                 # folded back in
+    assert len(g14["nodes"]) == len(glob["nodes"]) + 13
+    assert stats["lambda_methods_folded"] == 1
+    nodes = parse_to_functions(kept[14], max_nodes=1000, skip_global=False)[0]
+    assert cp.whole_file_real_method_count(g14) == 6                 # f, Foo.c, Foo.cpp, helper, main, lambda
+    assert len(nodes) > len(glob["nodes"])
+
+
+def test_files_defining_no_function_are_dropped_in_whole_file_mode():
+    stats = {}
+    kept = dict(cp.json_process(str(CRAFTED.parent), CRAFTED.name, stats, graph_unit="whole_file"))
+    # 12: the struct-only 12.c <global> is listed first and shadows 12.cpp (same numeric stem) -> no function -> dropped
+    # 13 (#define only), 16 (K&R main as .cpp: no METHOD), 17 (global array only) -> dropped
+    assert sorted(kept) == [14, 15]
+    assert stats["whole_files_without_real_method"] == 4 and stats["duplicate_global_same_idx"] == 1
+    assert cp.whole_file_real_method_count(kept[15]["functions"][0]) == 2   # sq, main (ADD macro not inside)
+
+
+def test_method_base_name_keeps_members_named_like_extensions():
+    assert cp.method_base_name("Foo.c:int()") == "Foo.c"
+    assert cp.method_base_name("Foo.cpp:int(int)") == "Foo.cpp"
+    assert cp.method_base_name("ns.f:int(int)") == "ns.f"
+    assert cp.method_base_name("15.c:ADD:ANY(2)") == "ADD"
+    assert cp.method_base_name("14.cpp:<global>.main.<lambda>0:int(int)") == "<global>.main.<lambda>0"

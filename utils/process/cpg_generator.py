@@ -22,6 +22,14 @@ Graph units (``json_process(..., graph_unit=...)``):
     ``stats["methods_folded_into_whole_file"]``). ``first_method`` would keep
     whichever function Joern lists first (a helper defined before ``main`` in
     21% of POJ-104 programs) and silently drop ``main``.
+
+Whole-file unit (graph_unit="whole_file"): the kept graph is the file's ``<global>``
+method. In Joern 4.0.400 its AST holds every top-level function and struct / class
+member function of the file, the global LOCALs and their initialisers; it does NOT
+hold ``#define`` function-like macro methods (``<file>:NAME:sig``), call-target
+stubs (file ``<empty>``) or ``<includes>:<global>``, and a C++ lambda's body is a
+separate method that this module folds back into the file graph. Its METHOD node's
+CODE is ``<global>`` and its BLOCK's CODE is ``<empty>``.
 """
 import json
 import os
@@ -95,19 +103,29 @@ def is_global_method(graph: dict) -> bool:
     return name.endswith("<global>") or name == "<global>"
 
 
+def is_lambda_method(graph: dict) -> bool:
+    """A C++ lambda exported as its own method, named
+    ``<file>:<global>.<enclosing>.<lambda>N:sig``. Its body is NOT part of the
+    file's ``<global>`` AST (only a METHOD_REF is), so whole_file mode folds its
+    nodes and edges into the file graph."""
+    return "<lambda>" in str(graph.get("function") or "")
+
+
 def is_macro_method(graph: dict) -> bool:
     """A ``#define`` function-like macro exported as a method: named
-    ``<file>:NAME:sig`` (e.g. ``12.c:SQ:ANY(1)``) and sharing no node with ``<global>``."""
-    if is_global_method(graph):
+    ``<file>:NAME:sig`` (e.g. ``12.c:SQ:ANY(1)``) and sharing no node with ``<global>``.
+    Lambdas also carry the file prefix but are real code (see is_lambda_method)."""
+    if is_global_method(graph) or is_lambda_method(graph):
         return False
     f = os.path.basename(str(graph.get("file") or ""))
     return bool(f) and str(graph.get("function") or "").startswith(f + ":")
 
 
 def whole_file_real_method_count(graph: dict) -> int:
-    """Number of real functions inside a ``<file>:<global>`` graph: its METHOD nodes
-    other than the ``<global>`` spine itself. 0 means Joern parsed nothing in the
-    file (the graph is only the 3-node spine)."""
+    """Number of functions inside a ``<file>:<global>`` graph: its METHOD nodes
+    other than the ``<global>`` spine itself. 0 means the file defines no function
+    (declarations / structs / ``#define`` only, or a parse failure such as a K&R
+    ``main()`` written as .cpp); such a file is not a usable graph."""
     return sum(1 for n in graph.get("nodes", []) or []
                if str(n.get("label") or "").upper() == "METHOD"
                and (n.get("properties") or {}).get("CODE") != "<global>")
@@ -115,7 +133,9 @@ def whole_file_real_method_count(graph: dict) -> int:
 
 _DUPLICATE_SUFFIX = re.compile(r"<duplicate>\d+")
 # `12.c:` in front of a #define macro method's name (`12.c:SQ:ANY(1)`)
-_FILE_PREFIX = re.compile(r"\A[^:\s]+\.(?:c|cc|cpp|cxx|C|h|hh|hpp|hxx):(?=\S)")
+# the pipeline writes numeric stems (datamanager.to_files), so only `<digits>.<ext>:` is a file
+# prefix; a C++ member named like an extension (`Foo.c:int()`) must keep its scope
+_FILE_PREFIX = re.compile(r"\A\d+\.(?:c|cc|cpp|cxx|C|h|hh|hpp|hxx):(?=\S)")
 
 
 def method_base_name(full_name: str) -> str:
@@ -208,9 +228,11 @@ def json_process(in_path, json_file, stats: dict | None = None, graph_unit: str 
 
 
 def _json_process_whole_file(methods: list, stats: dict | None):
-    """graph_unit="whole_file": one entry per numbered file = its <global> method."""
+    """graph_unit="whole_file": one entry per numbered file = its <global> method,
+    plus the nodes / edges of the file's C++ lambdas (Joern exports a lambda as a
+    separate method whose body is not under <global>)."""
     kept, skipped_other, folded, dup_global = {}, 0, 0, 0
-    files_with_real_method = set()
+    lambdas = {}                            # idx -> [lambda method graphs]
     for g in methods:
         if is_global_method(g):
             r = graph_indexing(g, keep_global=True)
@@ -228,18 +250,31 @@ def _json_process_whole_file(methods: list, stats: dict | None):
             skipped_other += 1              # call-target stubs (file <empty>), methods of include files
             continue
         folded += 1                         # real method / #define macro method of a numbered file
-        if not is_macro_method(g):
-            files_with_real_method.add(r[0])
-    # a <global> without any real method is a parse failure, not a graph: drop it so the row
-    # goes through the rescue pass and is counted as lost (a kept 3-node spine would silently
-    # become a labelled training example)
-    empty = sorted(i for i in kept if i not in files_with_real_method)
+        if is_lambda_method(g):
+            lambdas.setdefault(r[0], []).append(g)
+    n_lambda = 0
+    for idx, lams in lambdas.items():
+        if idx not in kept:
+            continue
+        g = kept[idx]["functions"][0]
+        have = {str(n.get("id")) for n in g.get("nodes", []) or []}
+        for lam in lams:
+            new_nodes = [n for n in lam.get("nodes", []) or [] if str(n.get("id")) not in have]
+            have.update(str(n.get("id")) for n in new_nodes)
+            g["nodes"] = list(g.get("nodes", []) or []) + new_nodes
+            g["edges"] = list(g.get("edges", []) or []) + list(lam.get("edges", []) or [])
+            n_lambda += 1
+    # a <global> that defines no function (declarations / #define only, or a parse failure such
+    # as K&R main written as .cpp) is not a graph: drop it so the row is counted as lost instead
+    # of silently becoming a labelled training example made of the file spine
+    empty = sorted(i for i, e in kept.items() if whole_file_real_method_count(e["functions"][0]) == 0)
     for i in empty:
         del kept[i]
     if stats is not None:
         stats["methods_total"] = stats.get("methods_total", 0) + len(methods)
         stats["skipped_unnumbered"] = stats.get("skipped_unnumbered", 0) + skipped_other
         stats["methods_folded_into_whole_file"] = stats.get("methods_folded_into_whole_file", 0) + folded
+        stats["lambda_methods_folded"] = stats.get("lambda_methods_folded", 0) + n_lambda
         stats["duplicate_global_same_idx"] = stats.get("duplicate_global_same_idx", 0) + dup_global
         stats["whole_files_kept"] = stats.get("whole_files_kept", 0) + len(kept)
         stats["functions_kept"] = stats.get("functions_kept", 0) + len(kept)

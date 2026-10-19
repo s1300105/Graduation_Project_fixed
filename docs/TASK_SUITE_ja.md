@@ -36,7 +36,7 @@
 ## 3. パイプラインの変更（この決定で入れる。実装は後続のコミット）
 
 1. **多クラス分類**（`--num_classes`、`--embed` 時にラベルから推定して `input/manifest.json` に記録）。ヘッドの幅、focal loss の α（クラス数 C で `(1/C)/頻度`）、argmax の指標（accuracy / macro-F1 / top-5）、選択基準 `--select_on macro_f1|accuracy`、`compare_runs.py --metric macro_f1|accuracy`。**二値の経路はビット同一**（`tests/test_golden_binary.py` が凍結した出力と完全一致を確認する）。
-2. **プログラム全体のグラフ**（`--graph_unit whole_file`）。Joern のファイル単位 `<global>` 疑似メソッドを採る。その AST はファイル内の全関数のノードを含み（実測: 固定データで 84 ⊃ 80 ノード）、グローバル変数とその初期化子も含み、`#define` の関数風マクロや呼び先スタブは含まない（実測）。これまでの「最初の非 `<global>` メソッドを採る」規則は、POJ で 15%、CodeNet で 44% のプログラムで main を捨てていた（実測、各 200 本）。
+2. **プログラム全体のグラフ**（`--graph_unit whole_file`）。Joern のファイル単位 `<global>` 疑似メソッドを採る。その AST はファイル内の全トップレベル関数と構造体・クラスのメンバ関数のノードを含み（実測: 固定データで 84 ⊃ 80 ノード）、グローバル変数とその初期化子も含み、`#define` の関数風マクロや呼び先スタブは含まない（実測）。C++ のラムダ本体は別メソッドとして出るので合流させる。関数を 1 つも定義しないファイル（解析失敗を含む）は殻にせず損失に数える。これまでの「最初の非 `<global>` メソッドを採る」規則は、POJ で 15%、CodeNet で 44% のプログラムで main を捨てていた（実測、各 200 本）。
 3. **ノード数の上限は位置順の切り捨て。** 上限に当たるとファイル後方の関数から消える。`graphs_at_cap` を manifest に記録する。CodeNet では `--max_nodes 1000` を推奨。
 4. **拡張子の規則。** 前処理スクリプトが `ext` 列を書き、`to_files` がそれを優先する。K&R 形式の `main()`（戻り値型なし。POJ 訓練の 6%）を `.cpp` で渡すと main が丸ごと消える（Joern 4.0.400 で 6/6 実測）。逆に現代 C++ を `.c` で渡すと `using namespace std;` が UNKNOWN になるが main は残る。規則: **K&R main → `.c`、それ以外で C++ の手がかりがあれば `.cpp`**。BigVul の判定（`guess_extension`）は変えない。
 5. **救済段階 C。** 小文字のシグネチャマクロ（`av_cold`、`coroutine_fn`、`APR_INLINE` など）と `MACRO(type)` 形の戻り値型を剥がす。Devign で 4.5%、D2A で 5.5% の関数がこれで Joern に落ちていた（実測、各 200 本）。

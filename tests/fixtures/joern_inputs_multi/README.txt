@@ -46,3 +46,16 @@ The sources themselves were written with
                            index=[201, 202, 203, 204, 205]), "tests/fixtures/joern_inputs_multi")
 i.e. with the explicit `ext` column (the whole-program datasets choose the extension
 this way: K&R main -> .c, else C++ hints -> .cpp) rather than guess_extension.
+
+joern_v4_export_crafted.json (same Joern 4.0.400 + joern/graph-for-funcs.sc invocation) was produced
+during the adversarial review from seven crafted files written through datamanager.to_files:
+  12.c    struct Only { int a; int b; };            (declarations only; same numeric stem as 12.cpp)
+  12.cpp  int main() { return 0; }
+  13.c    #define SQ(x) ((x)*(x))                     (function-like macro only)
+  14.cpp  namespace ns { int f(int); }  struct Foo { int c(); int cpp(int); }  static int helper(int);
+          int main() { auto cmp = [](int a, int b) { ... }; ... }   (lambda inside main)
+  15.c    #define ADD(a,b) ((a)+(b))  int sq(int);  int main()
+  16.cpp  main() { ... }                              (K&R main written as .cpp: Joern emits no METHOD)
+  17.c    int table[4] = {1, 2, 3, 4};                 (global array only)
+It pins: lambda bodies are separate methods that whole_file mode folds back in; a struct member named
+`c` / `cpp` is not a file prefix; files defining no function are dropped in whole_file mode.

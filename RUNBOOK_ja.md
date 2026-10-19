@@ -66,7 +66,7 @@ python -c "import json;print(json.dumps(json.load(open('data/cpg/cpg_manifest.js
 cat data/input/manifest.json
 ```
 
-  - `rows_lost_in_joern`: Joern で解析できず除外された関数数（論文に書く）。`rescued_stage_A` / `rescued_stage_B` はシグネチャのマクロを除いて救済できた件数
+  - `rows_lost_in_joern`: Joern で解析できず除外された関数数（論文に書く）。`rescued_stage_A` / `B` / `C` はシグネチャのマクロを除いて救済できた件数（C は小文字マクロと戻り値型マクロ。後から追加したので、古い CPG と比べるときは `--rescue_stages AB`）
   - 除外が多い（1 割超）ときは `python scripts/diagnose_joern_losses.py --split train --slice 0 --max 60` で内訳を見る（`method_dropped` が出たらパイプラインのバグなので報告）
   - `skipped_global`: `<global>` の除外数（0 でなければ修正が効いている）
   - `positives_after_filter`: 各分割の陽性数
@@ -167,6 +167,7 @@ python data/scripts/make_codenet_json.py --input data/raw/Project_CodeNet_C++100
 
 ```bash
 # プログラム全体: Joern のファイル単位 <global> を 1 グラフにする（main と補助関数、グローバル変数とその初期化子を含む。#define の関数風マクロと呼び先スタブは含まない）
+# --graph_unit は --cpg と --embed の両方に同じ値を渡す（別々に実行して食い違うと --embed が止まる）
 nohup python -u run.py --cpg --embed --dataset poj104  --data_root data_poj     --graph_unit whole_file --max_nodes 1000 > logs/poj_cpg_embed.log 2>&1
 nohup python -u run.py --cpg --embed --dataset codenet --data_root data_codenet --graph_unit whole_file --max_nodes 1000 > logs/codenet_cpg_embed.log 2>&1
 # 単一関数: 既定（first_method）。救済段階 C（小文字マクロ）が自動で効く
@@ -174,8 +175,8 @@ nohup python -u run.py --cpg --embed --dataset devign  --data_root data_devign >
 ```
 
 - `--max_nodes` の切り捨ては**ソース位置順**なので、プログラム全体では後方の関数（しばしば main）から消える。`input/manifest.json` の `graphs_at_cap` を見て、無視できない割合なら上げる（CodeNet の 200 本試走では 1000 ノードで 4 本 = 2%）。
-- `cpg_manifest.json` の `whole_files_without_real_method` は Joern が何も解析できなかったファイル（殻にはせず、救済パス → `rows_lost_in_joern`）。`rescued_stage_C` は小文字マクロで救えた件数。
-- `--node_code_mode full`（既定）では `<global>` の BLOCK ノードがファイル全文の CLS を持つ。テキスト枝との冗長性を抑えたい場合は `first_line` を別の `--data_root` で作って比較する。
+- `cpg_manifest.json` の `whole_files_without_real_method` は関数を 1 つも定義していないファイル（`#define` や構造体だけ、または K&R の `main()` を `.cpp` で渡したなどの解析失敗）。殻のグラフにはせず `rows_lost_in_joern` に数える。プログラム全体では救済パスを走らせない（`rescue_skipped_whole_file`）。C++ のラムダは Joern が別メソッドとして出すので、本体を `<global>` のグラフに合流させる（`lambda_methods_folded`）。
+- `--node_code_mode full`（既定）では各関数の METHOD / BLOCK ノードがその関数全文の CLS を持つ（`<global>` 自身の BLOCK は Joern 4.0.400 では `<empty>`）。テキスト枝との冗長性を抑えたい場合は `first_line` を別の `--data_root` で作って比較する。
 - 多クラスのクラス数は `--embed` が `target` から推定して `input/manifest.json` に書く（`--num_classes` で明示も可。食い違えば止まる）。
 
 ### 11.3 学習と判定

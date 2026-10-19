@@ -45,9 +45,9 @@ HEAD にだけあった pre-GCN attention と 768 次元化は論文にないの
 
 - `pytest`（37 件、CPU）: 実パイプライン形式のサンプル `data/check_data/cpg_head_check.json` に対する辺種別の一致（Joern が出した 67 AST / 59 CFG / 37 PDG と完全一致）、`<global>` の除外、3 モデル種 × アブレーションの forward / backward、損失の式、ストリームの順序、2 seed × 3 設定の端から端までの学習・評価・再評価、分割スクリプト、Joern v4.0.400 の実出力（`tests/fixtures/joern_v4_export.json`）の読み込み。
 - Joern v4.0.400 を使って `tests/fixtures/joern_inputs/` の 12 関数で `run.py --cpg --embed --node_embedding fast` → `--mode train`（hybrid / graph_only、2 seed）→ `scripts/compare_runs.py` まで通した。12 ファイル中 7 件が `.cpp`（うち 101 は初期化子リストだけのコンストラクタ断片）、5 件が `.c` として書き出され、`CClient::ClearServerDependentCaps` が 80 ノード・AST 79 / CFG 64 / PDG 198 本の本物のグラフになる（元のコードでは 2 ノードの殻）。
-- **Joern で解析できない関数の扱い。** シグネチャのマクロ（`__init`、`__user`、`UNUSED`、`__attribute__((...))` など）で Joern が関数を認識できない場合、`--cpg` はシグネチャからマクロを除いた版で自動的に再投入する（救済パス。段階 A は控えめ、段階 B は積極的。本文は変えず、テキスト枝は元のコードを読む。`--no_rescue_macros` で無効化）。それでも落ちる関数（例: クラス文脈のないコンストラクタ断片）は除外される。件数は `data/cpg/cpg_manifest.json` の `rescued_stage_A` / `rescued_stage_B` / `rows_lost_in_joern` に出るので論文に書くこと。両腕とも同じ入力ファイルを読むので比較は対称。
+- **Joern で解析できない関数の扱い。** シグネチャのマクロ（`__init`、`__user`、`UNUSED`、`__attribute__((...))` など）で Joern が関数を認識できない場合、`--cpg` はシグネチャからマクロを除いた版で自動的に再投入する（救済パス。段階 A は控えめ、段階 B は積極的。本文は変えず、テキスト枝は元のコードを読む。`--no_rescue_macros` で無効化）。それでも落ちる関数（例: クラス文脈のないコンストラクタ断片）は除外される。件数は `data/cpg/cpg_manifest.json` の `rescued_stage_A` / `rescued_stage_B` / `rescued_stage_C` / `rows_lost_in_joern` に出るので論文に書くこと（キーは 0 件でも常に書く）。両腕とも同じ入力ファイルを読むので比較は対称。**段階 C（小文字のシグネチャマクロ `av_cold` / `coroutine_fn` / `APR_INLINE`、戻り値型マクロ `APR_DECLARE(type)`）は後から追加した**ので、それ以前に作った BigVul の CPG を作り直すと行集合が増える（FFmpeg 由来の関数）。以前の挙動で作り直すなら `--rescue_stages AB`。プログラム全体（`--graph_unit whole_file`）では救済パスは走らない（先頭の `#define` / `#include` 行を関数シグネチャとして書き換えてしまうため。件数は `rescue_skipped_whole_file`）。
 - **BigVul の `lang` 列は信頼しない。** 公開ミラーでは `CPP` と記録された行が 1.4% しかないのに、C++ 構文を含む関数は 10% 以上ある。`lang` は「C++ である」方向のヒントにだけ使い、`C` と書かれていても構文判定で C++ なら `.cpp` として Joern に渡す。
-- 落ちた関数の内訳は `python scripts/diagnose_joern_losses.py --split train --slice 0` で調べられる（落ちた関数を Joern に再投入し、「Joern がメソッドを出していない」か「出ているのに捨てている（バグ）」かを分類する）。
+- 落ちた関数の内訳は `python scripts/diagnose_joern_losses.py --split train --slice 0` で調べられる（`--graph_unit` は `cpg_manifest.json` から読む）（落ちた関数を Joern に再投入し、「Joern がメソッドを出していない」か「出ているのに捨てている（バグ）」かを分類する）。
 - **未検証**: BigVul 全体での CPG 生成・学習（データと GPU が要る）。CodeBERT ノード埋め込み（`--node_embedding codebert`）は 75 ノードのサンプルに対するテスト（`tests/test_node_embedding_codebert.py`）のみで、全データでは未実行。
 
 ## 使い方（GPU マシンでの詳細手順は RUNBOOK_ja.md）
@@ -92,7 +92,7 @@ python data/scripts/make_codenet_json.py --input data/raw/Project_CodeNet_C++100
 # Devign（CodeXGLUE defect detection、二値・均衡）: 公式分割を保ち、ラベル衝突・分割またぎの重複を除く
 python data/scripts/make_devign_json.py --input data/raw/codexglue_defect --hf --out_dir data_devign/cleaned_data
 
-# プログラム全体は <global> を 1 グラフにする。ノード上限は位置順の切り捨てなので上げる
+# プログラム全体は <global> を 1 グラフにする。ノード上限は位置順の切り捨てなので上げる。--graph_unit は --cpg と --embed に同じ値を渡す（違えば --embed が止まる）
 python run.py --cpg --embed --dataset poj104  --data_root data_poj     --graph_unit whole_file --max_nodes 1000
 python run.py --cpg --embed --dataset codenet --data_root data_codenet --graph_unit whole_file --max_nodes 1000
 python run.py --cpg --embed --dataset devign  --data_root data_devign                       # 単一関数は既定どおり

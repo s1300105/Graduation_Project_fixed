@@ -441,3 +441,68 @@ def test_build_model_rejects_incompatible_ablations():
         R.build_model("graph_only", DEV, hidden_dim=8, num_rgcn_layers=1, ablation="no_gate")
     with pytest.raises(ValueError):
         R.build_model("hybrid", DEV, hidden_dim=8, num_rgcn_layers=1, fusion_layers=1, ablation="bogus")
+
+
+# ---------------------------------------------------------------------------------------
+# --cpg / --embed safety checks (no Joern needed)
+# ---------------------------------------------------------------------------------------
+from utils.process import cpg_generator as _cp  # noqa: E402
+
+_EXPORT = Path(__file__).resolve().parent / "fixtures" / "joern_v4_export.json"
+
+
+def _cpg_pickles_from_fixture(root: Path, graph_unit: str):
+    """Write <root>/cpg/{train,valid,test}_0_cpg.pkl from the fixture export plus a cpg_manifest."""
+    cpg_dir = root / "cpg"
+    cpg_dir.mkdir(parents=True, exist_ok=True)
+    kept = _cp.json_process(str(_EXPORT.parent), _EXPORT.name, {}, graph_unit=graph_unit)
+    rows = [{"cpg": e, "target": i % 2, "func": f"int f{idx}(void) {{ return {i}; }}", "idx": idx} for i, (idx, e) in enumerate(kept)]
+    for split in ("train", "valid", "test"):
+        pd.DataFrame(rows).to_pickle(cpg_dir / f"{split}_0_cpg.pkl")
+    (cpg_dir / "cpg_manifest.json").write_text(json.dumps({"args": {"graph_unit": graph_unit}, "splits": {}}))
+    return len(rows)
+
+
+def _embed_args(root: Path, graph_unit: str):
+    return R.build_parser().parse_args(["--embed", "--data_root", str(root), "--graph_unit", graph_unit,
+                                        "--node_embedding", "fast", "--max_nodes", "500"])
+
+
+def test_embed_refuses_a_graph_unit_different_from_the_cpg_run(tmp_path):
+    n = _cpg_pickles_from_fixture(tmp_path, "whole_file")
+    assert n == 10
+    with pytest.raises(RuntimeError, match="graph_unit"):
+        R.embed_generate(_embed_args(tmp_path, "first_method"))
+    assert not (tmp_path / "input" / "manifest.json").exists()
+
+
+def test_embed_refuses_to_write_an_input_set_without_graphs(tmp_path):
+    _cpg_pickles_from_fixture(tmp_path, "whole_file")
+    (tmp_path / "cpg" / "cpg_manifest.json").unlink()          # no manifest to compare against ...
+    with pytest.raises(RuntimeError, match="no graph"):      # ... so the empty result itself must stop it
+        R.embed_generate(_embed_args(tmp_path, "first_method"))
+
+
+def test_embed_whole_file_from_fixture_records_unit_and_classes(tmp_path):
+    _cpg_pickles_from_fixture(tmp_path, "whole_file")
+    R.embed_generate(_embed_args(tmp_path, "whole_file"))
+    m = json.loads((tmp_path / "input" / "manifest.json").read_text())
+    assert m["graph_unit"] == "whole_file" and m["num_classes"] == 2 and m["counts"]["graphs"] == 30
+    assert m["counts"]["rows_without_graph"] == 0
+
+
+def test_cpg_validates_the_ext_column_before_deleting_the_old_cpg_dir(tmp_path):
+    cleaned = tmp_path / "cleaned_data"
+    cleaned.mkdir()
+    for split in ("train", "valid", "test"):
+        rows = [{"idx": i, "func": "int f(void) { return 0; }", "target": 0, "ext": ".c" if i else ".cc"} for i in range(3)]
+        (cleaned / f"x_{split}.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+    old = tmp_path / "cpg"
+    old.mkdir()
+    (old / "keep_me.pkl").write_text("previous run")
+    args = R.build_parser().parse_args(["--cpg", "--data_root", str(tmp_path), "--dataset", "x", "--joern_cli_dir", "/nonexistent/"])
+    for split in ("train", "valid", "test"):
+        setattr(args, f"{split}_jsonl", str(cleaned / f"x_{split}.jsonl"))
+    with pytest.raises(ValueError, match="ext column"):
+        R.cpg_generate(args)
+    assert (old / "keep_me.pkl").exists()                     # nothing was removed before the check

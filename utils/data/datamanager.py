@@ -190,7 +190,7 @@ _GNUC_STYLE = r"G_GNUC_[A-Z0-9_]+"
 _LOWERCASE_MACRO_RE = re.compile(
     r"\b(?:" + "|".join(map(re.escape, LOWERCASE_SIGNATURE_MACROS)) + r")\b(?!\s*\()"
     r"|\b(?:" + "|".join(map(re.escape, LOWERCASE_SIGNATURE_MACROS_WITH_ARGS)) + r"|" + _GNUC_STYLE
-    + r")\b(?:\s*\([^()]*\))?"
+    + r")\b(?:\s*\((?:[^()]|\([^()]*\))*\))?"      # argument list, one level of nested parentheses
 )
 # `APR_DECLARE(int) foo(` / `static APR_DECLARE_NONSTD(void *) foo(` -> `int foo(` / `static void * foo(`
 # The closing paren must be followed by the function name and its parameter list, so
@@ -208,8 +208,8 @@ def strip_lowercase_signature_macros(code: str) -> str:
     and unwrap a return-type macro ``MACRO(type)`` at the start of the head.
     Only the text before the first `{` is changed."""
     head, body = _split_head(code or "")
+    head = _LOWERCASE_MACRO_RE.sub(" ", head)        # first, so `APR_DECLARE(int) av_cold foo(` unwraps too
     head = _RETURN_TYPE_MACRO_RE.sub(lambda m: f"{m.group(1)}{m.group(3)} ", head, count=1)
-    head = _LOWERCASE_MACRO_RE.sub(" ", head)
     head = re.sub(r"[ \t]{2,}", " ", head)
     return head + body
 
@@ -238,20 +238,23 @@ def to_files(data_frame: pd.DataFrame, out_path):
     the row's ``ext`` column when the frame has one and the value is a non-null
     string ('.c' or '.cpp'; anything else raises); otherwise it is chosen from
     the ``lang`` column when present or from C++ syntax hints (BigVul path,
-    unchanged)."""
+    unchanged). A null ext (None / NaN / pd.NA) means "no ext"; any other
+    non-string or unknown value raises (a mangled ext column must not silently
+    fall back to the guess, which is exactly what the column exists to avoid)."""
     os.makedirs(out_path, exist_ok=True)
-    has_lang = "lang" in data_frame.columns
-    has_ext = "ext" in data_frame.columns
-    for idx, row in data_frame.iterrows():
-        ext = row["ext"] if has_ext else None
-        if isinstance(ext, str):
-            if ext not in _VALID_EXTS:
-                raise ValueError(f"row {idx}: ext must be one of {_VALID_EXTS}, got {ext!r}")
-        else:
-            ext = guess_extension(row.func, row["lang"] if has_lang else None)
+    # read the columns directly: iterrows() coerces a row to one dtype, and under pandas 3 a
+    # number in an otherwise-string row silently becomes NaN (which would look like "no ext")
+    funcs = data_frame["func"].tolist()
+    langs = data_frame["lang"].tolist() if "lang" in data_frame.columns else [None] * len(funcs)
+    exts = data_frame["ext"].tolist() if "ext" in data_frame.columns else [None] * len(funcs)
+    for idx, func, lang, ext in zip(data_frame.index, funcs, langs, exts):
+        if ext is None or (not isinstance(ext, str) and pd.isna(ext)):
+            ext = guess_extension(func, lang)                                   # no ext: BigVul path
+        elif not isinstance(ext, str) or ext not in _VALID_EXTS:
+            raise ValueError(f"row {idx}: ext must be one of {_VALID_EXTS} or null, got {ext!r}")
         fp = os.path.join(out_path, f"{idx}{ext}")
         with open(fp, 'w', encoding='utf-8') as f:
-            f.write(row.func)
+            f.write(func)
 
 def create_with_index(data_frame, columns):
     """

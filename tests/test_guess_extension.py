@@ -96,3 +96,14 @@ def test_to_files_rejects_unknown_extensions(tmp_path):
     df = pd.DataFrame({"func": ["int f(void) { return 1; }"], "ext": ["c"]}, index=[1])
     with pytest.raises(ValueError):
         to_files(df, str(tmp_path))
+
+
+@pytest.mark.parametrize("bad", [1.0, 3, b".c", True])
+def test_to_files_rejects_non_string_non_null_ext(tmp_path, bad):
+    # (a Series with its own default index would be re-indexed to NaN by the DataFrame constructor
+    #  and silently test the null path instead -- build the column from a list)
+    df = pd.DataFrame({"func": ["int f(void) { return 0; }"], "ext": [bad]}, index=[7])
+    assert not pd.isna(df["ext"].iloc[0])
+    with pytest.raises(ValueError):
+        to_files(df, str(tmp_path))
+    assert not list(tmp_path.iterdir())

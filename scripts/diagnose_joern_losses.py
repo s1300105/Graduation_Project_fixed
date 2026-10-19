@@ -78,7 +78,7 @@ def replay_slice(jsonl_path, seed, max_chars, min_chars, slice_size, s):
     raise SystemExit(f"slice {s} not found")
 
 
-def _joern_pass(df: pd.DataFrame, joern_cli_dir: str, work: Path, tag: str):
+def _joern_pass(df: pd.DataFrame, joern_cli_dir: str, work: Path, tag: str, graph_unit: str = "first_method"):
     """Write df.func through to_files, run Joern, return ({stem: [methods]}, {stem: filename}, kept_idx)."""
     if work.exists():
         shutil.rmtree(work)
@@ -102,13 +102,13 @@ def _joern_pass(df: pd.DataFrame, joern_cli_dir: str, work: Path, tag: str):
         f = str(m.get("file") or "")
         if f and f != "N/A" and not f.startswith("<"):
             by_file[Path(f).stem].append(m)
-    kept_idx = {idx for idx, _ in (cp.json_process(str(cpg_dir), jf, {}) or [])}
+    kept_idx = {idx for idx, _ in (cp.json_process(str(cpg_dir), jf, {}, graph_unit=graph_unit) or [])}
     return by_file, written, kept_idx
 
 
-def rerun_joern(lost: pd.DataFrame, joern_cli_dir: str, out_dir: Path):
+def rerun_joern(lost: pd.DataFrame, joern_cli_dir: str, out_dir: Path, graph_unit: str = "first_method"):
     verdict, written_all = {}, {}
-    by_file, written, kept = _joern_pass(lost, joern_cli_dir, out_dir / "joern_rerun", "rerun")
+    by_file, written, kept = _joern_pass(lost, joern_cli_dir, out_dir / "joern_rerun", "rerun", graph_unit)
     written_all.update(written)
     if by_file is None:
         return {k: ("joern_failed", "", "") for k in written}, written_all
@@ -137,7 +137,7 @@ def rerun_joern(lost: pd.DataFrame, joern_cli_dir: str, out_dir: Path):
             continue
         rows = rows.loc[list(variants)]
         rows["func"] = pd.Series(variants)
-        by_file, _, kept = _joern_pass(rows, joern_cli_dir, out_dir / f"joern_rescue_{stage}", f"rescue{stage}")
+        by_file, _, kept = _joern_pass(rows, joern_cli_dir, out_dir / f"joern_rescue_{stage}", f"rescue{stage}", graph_unit)
         if by_file is None:
             continue
         for stem in list(pending):
@@ -164,9 +164,17 @@ def main():
     ap.add_argument("--slice_size", type=int, default=500)
     ap.add_argument("--max", type=int, default=60, help="how many lost functions to re-run through Joern (0 = skip)")
     ap.add_argument("--out", default=None)
+    ap.add_argument("--graph_unit", choices=["first_method", "whole_file"], default=None,
+                    help="graph unit of the --cpg run being diagnosed (default: read from data_root/cpg/cpg_manifest.json, "
+                         "else first_method); the verdicts are only meaningful under the same unit")
     args = ap.parse_args()
 
     data_root = Path(args.data_root)
+    if args.graph_unit is None:
+        mf = data_root / "cpg" / "cpg_manifest.json"
+        args.graph_unit = (json.loads(mf.read_text()).get("args", {}).get("graph_unit", "first_method")
+                           if mf.exists() else "first_method")
+    print(f"graph_unit: {args.graph_unit}")
     jsonl = args.jsonl or str(data_root / "cleaned_data" / f"{args.dataset}_{args.split}.jsonl")
     pkl = data_root / "cpg" / f"{args.split}_{args.slice}_cpg.pkl"
     out = Path(args.out or f"logs/losses_{args.split}_{args.slice}")
@@ -198,7 +206,7 @@ def main():
 
     if args.max > 0:
         sample = lost.head(args.max)
-        verdict, written = rerun_joern(sample, args.joern_cli_dir, out)
+        verdict, written = rerun_joern(sample, args.joern_cli_dir, out, graph_unit=args.graph_unit)
         sample = sample.copy()
         sample["file"] = [written.get(str(i), "") for i in sample.index]
         sample["verdict"] = [verdict.get(str(i), ("?", "", ""))[0] for i in sample.index]

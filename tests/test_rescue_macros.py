@@ -158,3 +158,15 @@ def test_stages_a_and_b_are_unchanged_on_the_existing_fixtures():
     assert h.hexdigest() == _AB_FIXTURE_DIGEST
     # none of the BigVul fixture functions carries a lowercase signature macro: stage C never fires on them
     assert not any("C" in s for s in stages_seen)
+
+
+def test_stage_c_unwraps_return_type_macro_even_with_a_lowercase_macro_in_between():
+    code = "APR_DECLARE(int) av_cold foo(int x)\n{\n return x;\n}"
+    assert strip_lowercase_signature_macros(code).split("\n")[0].split() == ["int", "foo(int", "x)"]
+    stages = dict(rescue_variants(code))
+    assert stages["C"].startswith("int foo(int x)")
+
+
+def test_stage_c_macro_argument_list_with_nested_parentheses():
+    head = "void g(const char *fmt, ...) G_GNUC_PRINTF(f(1), 2)\n{\n}"
+    assert strip_lowercase_signature_macros(head).split("\n")[0].strip() == "void g(const char *fmt, ...)"
