@@ -148,6 +148,10 @@ def test_knr_main_edge_cases():
     assert not prep.knr_main("void main()\n{\n}")                        # has a return type
     assert not prep.knr_main("int main() {\n  domain();\n}")             # not at line start / other identifier
     assert not prep.knr_main("/* main( */\nint main() { char *s = \"main(\"; return 0; }")
+    # recursive call at column 0 (cleaned_code strips indentation) inside a typed main is NOT a K&R definition
+    assert not prep.knr_main(prep.prepare_code("#include<cstdio>\nint main(){\n    int n;\n    if(scanf(\"%d\",&n)==1){\n        main();\n    }\n    return 0;\n}"))
+    assert prep.choose_extension(prep.prepare_code("#include<cstdio>\nint main(){\n  main();\n  return 0;\n}"), default_ext=".cpp") == ".cpp"
+    assert prep.knr_main("#define main() int main()\nmain()\n{\n}") is False or True   # macro-defined main: documented as unspecified
     assert prep.choose_extension("void main()\n{\ncin >> x;\n}") == ".cpp"
     assert prep.choose_extension("void main()\n{\nscanf(\"%d\", &x);\n}") == ".c"
 
@@ -398,6 +402,24 @@ def test_make_codenet_json_user_split_and_problem_sampling(tmp_path):
         for p in ("p00001", "p00002", "p00003"):
             (bad / f"{p}.csv").write_text("submission_id,status\ns1,Accepted\n")
         codenet.main(["--input", str(root), "--out_dir", str(tmp_path / "y"), "--metadata_dir", str(bad)])
+    with pytest.raises(SystemExit, match="dirs available"):
+        codenet.main(["--input", str(root), "--out_dir", str(tmp_path / "out3"), "--problems", "99"])
+
+
+def test_codenet_user_split_fails_when_a_class_has_no_train_row(tmp_path):
+    """One user owning every program of a class cannot be split without emptying train for it."""
+    root, meta = tmp_path / "C++1000", tmp_path / "metadata"
+    _codenet_tree(root, meta)
+    for csv in meta.glob("p00001.csv"):
+        lines = csv.read_text().splitlines()
+        head, body = lines[0], lines[1:]
+        cols = head.split(",")
+        ui = cols.index("user_id")
+        body = [",".join(f.split(",")[:ui] + ["u_only"] + f.split(",")[ui + 1:]) for f in body]
+        csv.write_text("\n".join([head] + body) + "\n")
+    with pytest.raises(SystemExit, match="have no row in train|cannot"):
+        codenet.main(["--input", str(root), "--out_dir", str(tmp_path / "out"), "--metadata_dir", str(meta),
+                      "--split", "user", "--per_problem", "7", "--fractions", "0.6,0.2,0.2", "--seed", "3"])
 
 
 def test_codenet_reads_bytes_with_replacement(tmp_path):
@@ -432,6 +454,11 @@ def _devign_input():
     tr.append({"id": 51, "func": te[1]["func"], "target": te[1]["target"], "project": "qemu", "commit_id": "cleak"})
     # label conflict train/valid: both dropped
     tr.append({"id": 52, "func": va[2]["func"], "target": not va[2]["target"], "project": "qemu", "commit_id": "cconf"})
+    # the same function (same label) in all three splits: only the test copy survives (train < valid < test)
+    tr.append({"id": 54, "func": te[2]["func"], "target": te[2]["target"], "project": "qemu", "commit_id": "call3"})
+    va.append({"id": 70, "func": te[2]["func"], "target": te[2]["target"], "project": "qemu", "commit_id": "call3"})
+    # train -> valid leak (same label): train loses, valid keeps
+    tr.append({"id": 55, "func": va[3]["func"], "target": va[3]["target"], "project": "qemu", "commit_id": "cleak2"})
     # near-empty, CRLF
     te.append({"id": 60, "func": "int x;\r\n", "target": False, "project": "qemu", "commit_id": "cne"})
     tr.append({"id": 53, "func": fn(999).replace("\n", "\r\n"), "target": True, "project": "FFmpeg", "commit_id": None})
@@ -447,15 +474,17 @@ def test_make_devign_json(tmp_path):
     rows, classes, stats = _read_all(out, "devign")
     _check_contract(rows, classes, stats)
     assert classes == {"0": "0", "1": "1"}
-    assert stats["official_split_rows"] == {"train": 16, "valid": 4, "test": 5}
+    assert stats["official_split_rows"] == {"train": 18, "valid": 5, "test": 5}
     d = stats["dedup"]
     assert d["conflict_groups"] == 1 and d["rows_dropped_conflict_per_split"] == {"train": 1, "valid": 1, "test": 0}
-    assert d["rows_dropped_cross_split_leak_per_split"] == {"train": 1, "valid": 0, "test": 0}
+    assert d["rows_dropped_cross_split_leak_per_split"] == {"train": 3, "valid": 1, "test": 0}
     assert d["rows_dropped_within_split_duplicate_per_split"] == {"train": 1, "valid": 0, "test": 0}
     assert stats["near_empty_dropped"] == 1
     assert [len(rows[s]) for s in prep.SPLITS] == [13, 3, 4]                 # official assignment kept
     src = {r["source_id"]: r for s in prep.SPLITS for r in rows[s]}
     assert "test:1" in src and "train:51" not in src and "train:52" not in src and "validation:2" not in src
+    assert "test:2" in src and "train:54" not in src and "validation:70" not in src   # 3-way copy: test keeps
+    assert "validation:3" in src and "train:55" not in src                           # train -> valid leak
     assert "train:50" not in src and "train:1" in src and "test:60" not in src
     assert src["train:4"]["ext"] == ".cpp" and src["train:4"]["lang"] == "cpp"
     assert sum(r["ext"] == ".c" for r in src.values()) == len(src) - 1

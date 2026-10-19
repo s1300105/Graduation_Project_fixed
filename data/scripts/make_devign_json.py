@@ -7,7 +7,7 @@ is kept (no re-split): train / validation / test parquet -> train / valid / test
     * cross-split leaks are removed from the EARLIER split in the order train < valid < test
       (test keeps its row, train loses it);
     * within-split duplicates keep the first row;
-  -> drop near-empty -> ext by choose_extension (expect ~99% '.c'), lang consistent with ext.
+  -> drop near-empty -> ext by choose_extension (100% '.c' on the HF data: 27,151 rows), lang consistent with ext.
 idx is renumbered 0.. over train, valid, test (HF ids are per split and not unique).  --seed is only
 recorded (nothing here is random).
 

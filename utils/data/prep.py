@@ -14,9 +14,12 @@ Output
 
 Row fields (in this order)
 --------------------------
-``idx``        int, unique across ALL splits and stable for a given seed (``compare_runs`` aligns
-               test items by ``idx`` and ``shuffle_edges`` seeds on it; HF per-split ids are NOT
-               unique across splits, so every script renumbers from 0 in a deterministic order).
+``idx``        int, unique across ALL splits and stable for a given seed AND the same filtering
+               options (``--per_class`` / ``--drop_problems`` / ``--min_chars`` / ``--problems`` /
+               ``--per_problem`` / ``--metadata_dir``; changing any of them renumbers idx).
+               ``compare_runs`` aligns test items by ``idx`` and ``shuffle_edges`` seeds on it; HF
+               per-split ids are NOT unique across splits, so every script renumbers from 0 in a
+               deterministic order.
 ``func``       str, LF line endings, cleaned with the SAME ``cleaned_code`` as BigVul
                (``remove_empty_lines`` + ``remove_comments`` + ``remove_space_after_newline``;
                copied below, equality with ``data/scripts/make_bigvul_json.py`` is unit-tested).
@@ -172,10 +175,18 @@ def strip_literals_and_comments(code: str) -> str:
     return _STRIP_RE.sub('""', code or "")
 
 
+_TYPED_MAIN = re.compile(r"\b(?:int|void|long|short|unsigned|signed|char|double|float|auto)\s+main\s*\(")
+
+
 def knr_main(code: str) -> bool:
     """True when the program defines ``main`` K&R-style: ``main(`` at the start of a line with no
-    return type (not even on the previous non-blank line).  Comments / literals are ignored."""
+    return type (not even on the previous non-blank line).  Comments / literals are ignored.
+    A program that defines a typed ``main`` anywhere is never K&R: after ``cleaned_code`` strips
+    indentation a recursive call ``main();`` sits at column 0 and would otherwise be mistaken for
+    a definition (seen in CodeNet, ~1e-5 of programs)."""
     s = strip_literals_and_comments(code)
+    if _TYPED_MAIN.search(s):
+        return False
     lines = s.split("\n")
     for i, line in enumerate(lines):
         if not _KNR_MAIN_LINE.match(line):

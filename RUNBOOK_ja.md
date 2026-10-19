@@ -154,14 +154,16 @@ mkdir -p data/raw
 python data/scripts/make_poj104_json.py --input data/raw/poj104 --hf --out_dir data_poj/cleaned_data
 # Devign (CodeXGLUE defect detection): parquet 3 本（22 MB）。公式分割を保ち、ラベル衝突 162 行・分割またぎ 2 行・重複 1 行・空 2 行を除いて 21,710 / 2,723 / 2,718
 python data/scripts/make_devign_json.py --input data/raw/codexglue_defect --hf --out_dir data_devign/cleaned_data
-# CodeNet C++1000: tarball 136 MB（1000 問題 × 500 本）。既定は 1 問題 100 本 = 10 万本。メタデータ（294 MB）があれば Accepted のみに絞り、--split user で利用者横断分割
+# CodeNet C++1000: tarball 136 MB（1000 問題 × 500 本）。既定は 1 問題あたり最大 100 本（Accepted 絞り込み・dedup・空プログラム除去の後に抽出。配布版は既に Accepted・近似重複除去済みなので実測ではほぼ 100 本）。メタデータ（294 MB）があれば status で絞り、--split user で利用者横断分割（train の全クラス在籍だけを強制。valid / test に欠けるクラスは prep_stats の class_coverage を見る）
 curl -L -o data/raw/Project_CodeNet_C++1000.tar.gz https://codait-cos-dax.s3.us.cloud-object-storage.appdomain.cloud/dax-project-codenet/1.0.0/Project_CodeNet_C++1000.tar.gz
 tar -xzf data/raw/Project_CodeNet_C++1000.tar.gz -C data/raw/
 python data/scripts/make_codenet_json.py --input data/raw/Project_CodeNet_C++1000 --out_dir data_codenet/cleaned_data --per_problem 100
 # 小さく試すなら --problems 50 --per_problem 100
 ```
 
-各スクリプトは `<dataset>_classes.json`（target → 問題 ID）と `<dataset>_prep_stats.json`（各段階の件数、重複、拡張子の内訳、K&R の件数）を書く。**学習より先にこれらをコミットする**（分割の凍結）。
+各スクリプトは `<dataset>_classes.json`（target → 問題 ID）と `<dataset>_prep_stats.json`（各段階の件数、重複、拡張子の内訳、K&R の件数、問題ごとの本数）を書く。**学習より先にこれらをコミットする**（分割の凍結）。
+
+注意: `input/*.pkl` と `cpg/*.pkl` は pandas のメジャー版をまたいで読めない（pandas 3 で書いた pickle は pandas 2.2 で `TypeError`）。`--cpg --embed` と `--mode train` は同じ環境で実行する。前処理の jsonl は移植できる。
 
 ### 11.2 CPG と埋め込み
 

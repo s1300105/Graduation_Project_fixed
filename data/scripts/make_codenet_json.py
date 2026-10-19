@@ -18,6 +18,12 @@ Steps:
 Example:
   python data/scripts/make_codenet_json.py --input /data/Project_CodeNet_C++1000 --problems 100 \
       --per_problem 100 --metadata_dir /data/Project_CodeNet/metadata --split user --out_dir data/cleaned_data
+
+--split user enforces that every class has a row in TRAIN only; valid / test may lack classes
+  (a 20-problem x 50-program trial left one class out of valid). Check class_coverage in
+  <dataset>_prep_stats.json; run.py's macro-F1 uses a fixed label set, so an absent class counts 0.
+--per_problem N is a cap: programs are sampled after the Accepted filter, the dedup and the
+  near-empty drop, so a problem can yield fewer rows (per_problem_counts in the stats file).
 """
 from __future__ import annotations
 

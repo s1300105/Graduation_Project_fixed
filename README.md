@@ -87,7 +87,7 @@ python run.py --mode test --run_dir runs/hybrid_bs16_lr1.0e-04_br0.30_seed0
 ```bash
 # POJ-104（104 クラス、プログラム全体）: HF の parquet を取得 → jsonl（分割またぎの重複除去、dedup、層化 80/10/10）
 python data/scripts/make_poj104_json.py --input data/raw/poj104 --hf --out_dir data_poj/cleaned_data
-# CodeNet C++1000（既定 100 本/問題 = 10 万本）。メタデータを渡すと Accepted のみ・利用者横断分割が可能
+# CodeNet C++1000（既定は 1 問題あたり最大 100 本 ≈ 10 万本）。メタデータを渡すと Accepted のみ・利用者横断分割が可能
 python data/scripts/make_codenet_json.py --input data/raw/Project_CodeNet_C++1000 --out_dir data_codenet/cleaned_data [--metadata_dir data/raw/Project_CodeNet/metadata --split user]
 # Devign（CodeXGLUE defect detection、二値・均衡）: 公式分割を保ち、ラベル衝突・分割またぎの重複を除く
 python data/scripts/make_devign_json.py --input data/raw/codexglue_defect --hf --out_dir data_devign/cleaned_data
