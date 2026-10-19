@@ -118,3 +118,6 @@ data/cpg/*.json
 joern/joern-cli/
 joern/joern-cli.zip
 workspace/
+
+# Claude Code worktrees / local state
+.claude/
