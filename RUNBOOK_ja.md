@@ -20,7 +20,7 @@ pip install --upgrade pip
 pip install torch --index-url https://download.pytorch.org/whl/cu124   # 3090 なら cu124 でよい
 pip install -r requirements.txt                                        # torch_geometric は pure-Python 版で動く（torch_scatter 不要）
 python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"   # True を確認
-pytest -q        # 67 件。初回は CodeBERT（約 500 MB）をダウンロードする。CPU で数分
+pytest -q        # 167 件。初回は CodeBERT（約 500 MB）をダウンロードする。CPU で数分
 ```
 
 ## 2. Joern 4
