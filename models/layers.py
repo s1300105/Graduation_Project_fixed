@@ -93,7 +93,7 @@ class GraphCodeFusion(nn.Module):
         self.proj_graph = nn.Linear(graph_dim, proj_dim)
         self.layers = nn.ModuleList([FusionBlock(proj_dim, num_heads, ffn_hidden_dim, dropout)
                                      for _ in range(attn_layers)])
-        self.gate_layer = nn.Linear(proj_dim * 2, 2) if use_gate else None
+        self.gate_layer = nn.Linear(proj_dim * 2, 2) if use_gate else None   # 2 = modalities (code, graph), not classes
         fused_dim = proj_dim * 2
         self.ffn_final = PositionwiseFFN(fused_dim, hidden_dim=ffn_hidden_dim, dropout=dropout)
         self.norm_final = nn.LayerNorm(fused_dim)

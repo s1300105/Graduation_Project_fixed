@@ -37,16 +37,19 @@ def batch():
     return _batch()
 
 
+@pytest.mark.parametrize("num_classes", [2, 3])
 @pytest.mark.parametrize("model_type,ablation", [
     ("hybrid", "none"), ("hybrid", "no_gate"), ("hybrid", "no_cls_skip"), ("hybrid", "shuffle_edges"),
     ("hybrid", "no_input_norm"), ("hybrid", "no_residual"), ("graph_only", "none"), ("codebert", "none"),
 ])
-def test_forward_shapes(batch, model_type, ablation):
+def test_forward_shapes(batch, model_type, ablation, num_classes):
     torch.manual_seed(0)
-    m = build_model(model_type, DEV, hidden_dim=32, num_rgcn_layers=2, fusion_layers=1, ablation=ablation)
+    m = build_model(model_type, DEV, hidden_dim=32, num_rgcn_layers=2, fusion_layers=1, ablation=ablation,
+                    num_classes=num_classes)
+    assert m.classifier[-1].out_features == num_classes
     m.train()
     logits = m(batch)
-    assert logits.shape == (3, 2)
+    assert logits.shape == (3, num_classes)
     loss = torch.nn.functional.cross_entropy(logits, batch.y.view(-1))
     loss.backward()
     grads = [p.grad for n, p in m.named_parameters() if p.requires_grad and "func_encoder" not in n]
@@ -58,7 +61,18 @@ def test_forward_shapes(batch, model_type, ablation):
         assert m.last_gate is None
     m.eval()
     with torch.no_grad():
-        assert m(batch).shape == (3, 2)
+        assert m(batch).shape == (3, num_classes)
+
+
+def test_num_classes_widens_only_the_last_layer():
+    m3 = build_model("codebert", DEV, num_classes=3)
+    assert m3.classifier[-1].out_features == 3
+    m2 = build_model("graph_only", DEV, hidden_dim=16, num_rgcn_layers=1)
+    assert m2.classifier[-1].out_features == 2            # default stays binary
+    g5 = build_model("graph_only", DEV, hidden_dim=16, num_rgcn_layers=1, num_classes=5)
+    assert g5.classifier[-1].out_features == 5 and g5.classifier[0].in_features == m2.classifier[0].in_features
+    with pytest.raises(ValueError):
+        build_model("graph_only", DEV, hidden_dim=16, num_rgcn_layers=1, num_classes=1)
 
 
 def test_hybrid_is_superset_of_baseline_input(batch):

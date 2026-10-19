@@ -30,11 +30,15 @@ def _graph(n, seed, label):
     return d
 
 
-def _write_split(input_dir: Path, split: str, n_rows: int, n_files: int = 2, pos_frac: float = 0.3, seed: int = 0):
+def _write_split(input_dir: Path, split: str, n_rows: int, n_files: int = 2, pos_frac: float = 0.3, seed: int = 0,
+                 num_classes: int = 2):
     rng = np.random.default_rng(seed)
     rows = []
     for i in range(n_rows):
-        y = int(rng.random() < pos_frac)
+        if num_classes > 2:
+            y = int(rng.integers(num_classes))
+        else:
+            y = int(rng.random() < pos_frac)           # binary fixture: byte-identical to the golden recording
         g = _graph(int(rng.integers(3, 9)), seed * 10_000 + i, y)
         func = f"int {split}_{i}(int a) {{ if (a > {i}) return a * {i}; return {y}; }}"
         rows.append({"input": g, "target": y, "func": func, "idx": seed * 10_000 + i, "commit_id": None, "project": "p"})
@@ -51,6 +55,29 @@ def data_root(tmp_path):
     _write_split(inp, "valid", 16, seed=2)
     _write_split(inp, "test", 16, seed=3)
     return tmp_path
+
+
+def _make_root3(root: Path, with_manifest: bool):
+    inp = root / "input"
+    inp.mkdir(parents=True)
+    _write_split(inp, "train", 40, seed=1, num_classes=3)
+    _write_split(inp, "valid", 16, seed=2, num_classes=3)
+    _write_split(inp, "test", 16, seed=3, num_classes=3)
+    if with_manifest:
+        (inp / "manifest.json").write_text(json.dumps({"num_relations": 3, "node_feat_dim": 768, "num_classes": 3,
+                                                       "graph_unit": "whole_file", "dataset": "toy3"}))
+    return root
+
+
+@pytest.fixture()
+def data_root3(tmp_path):
+    """Three classes; input/manifest.json declares num_classes 3 (as --embed writes it)."""
+    return _make_root3(tmp_path / "d3", with_manifest=True)
+
+
+@pytest.fixture()
+def data_root3_nomanifest(tmp_path):
+    return _make_root3(tmp_path / "d3nm", with_manifest=False)
 
 
 def test_focal_loss_matches_thesis_equation():
@@ -71,6 +98,31 @@ def test_focal_loss_matches_thesis_equation():
 def test_build_criterion_alpha_is_inverse_frequency():
     crit, alpha = R.build_criterion("focal", (970, 30), 2.0, DEV)
     assert torch.allclose(alpha, torch.tensor([0.5 / 0.97, 0.5 / 0.03]), atol=1e-4)
+    # the two-class expression is literally the old one (bit-identical alpha for the BigVul runs)
+    assert torch.equal(alpha, torch.tensor([0.5 / (970 / 1000), 0.5 / (30 / 1000)], dtype=torch.float32))
+    assert torch.equal(alpha, torch.tensor([0.5 / 0.97, 0.5 / 0.03]))
+
+
+def test_build_criterion_multiclass_alpha():
+    counts = (600, 300, 100)
+    total = sum(counts)
+    crit, alpha = R.build_criterion("focal", counts, 2.0, DEV)
+    assert alpha.shape == (3,)
+    assert torch.allclose(alpha, torch.tensor([(1 / 3) / (c / total) for c in counts]))
+    assert torch.allclose(alpha, torch.tensor([5 / 9, 10 / 9, 10 / 3]))
+    assert isinstance(crit, R.FocalLoss) and crit.alpha.shape == (3,)
+    # the focal loss itself handles C classes
+    logits = torch.randn(8, 3); y = torch.tensor([0, 1, 2, 0, 1, 2, 0, 0])
+    assert torch.isfinite(crit(logits, y))
+    _, ones = R.build_criterion("ce", counts, 2.0, DEV)
+    assert torch.equal(ones, torch.ones(3))
+    _, w = R.build_criterion("weighted_ce", counts, 2.0, DEV)
+    assert w.shape == (3,)
+    # an absent class gets alpha 1.0, the others keep their weight
+    _, a0 = R.build_criterion("focal", (600, 0, 300), 2.0, DEV)
+    assert a0[1] == 1.0 and torch.allclose(a0[[0, 2]], torch.tensor([(1 / 3) / (600 / 900), (1 / 3) / (300 / 900)]))
+    with pytest.raises(ValueError):
+        R.build_criterion("focal", (10,), 2.0, DEV)
 
 
 def _order(ds):
@@ -102,6 +154,35 @@ def test_count_targets(data_root):
     files = R.split_files(data_root / "input", "train")
     c0, c1 = R.count_targets(files)
     assert c0 + c1 == 40 and c1 > 0
+    assert R.count_targets(files, num_classes=2) == (c0, c1)
+
+
+def test_count_targets_multiclass(data_root3):
+    files = R.split_files(data_root3 / "input", "train")
+    counts = R.count_targets(files, num_classes=3)
+    assert isinstance(counts, tuple) and len(counts) == 3 and all(isinstance(c, int) for c in counts)
+    assert sum(counts) == 40 and min(counts) > 0
+    ref = np.zeros(3, dtype=int)
+    for f in files:
+        ref += np.bincount(pd.read_pickle(f)["target"].to_numpy(), minlength=3)
+    assert counts == tuple(int(c) for c in ref)
+    # a label outside 0..C-1 raises instead of being clipped
+    with pytest.raises(ValueError, match="outside 0..2"):
+        R.count_targets(_shift_targets(files, data_root3), num_classes=3)
+    # the binary path still clips (unchanged behaviour); the multi-class path never does
+    assert sum(R.count_targets(files)) == 40
+
+
+def _shift_targets(files, root):
+    """Copy the split with every target raised by 1 (so one class is out of range)."""
+    out_dir = root / "shifted"; out_dir.mkdir()
+    out = []
+    for f in files:
+        df = pd.read_pickle(f)
+        df["target"] = df["target"] + 1
+        p = out_dir / Path(f).name
+        df.to_pickle(p); out.append(str(p))
+    return out
 
 
 def test_metrics_and_threshold():
@@ -111,6 +192,40 @@ def test_metrics_and_threshold():
     assert m["tp"] == 2 and m["fp"] == 1 and m["fn"] == 1 and m["tn"] == 2
     bt = R.best_threshold(probs, labels)
     assert 0.05 <= bt["threshold"] <= 0.95 and bt["f1"] >= m["f1"]
+
+
+P3 = np.array([[0.7, 0.2, 0.1],     # 0 -> 0
+               [0.1, 0.8, 0.1],     # 1 -> 1
+               [0.2, 0.2, 0.6],     # 2 -> 2
+               [0.5, 0.3, 0.2],     # 0 -> 0
+               [0.3, 0.4, 0.3],     # 2 -> 1 (wrong)
+               [0.1, 0.1, 0.8]])    # 1 -> 2 (wrong)
+L3 = np.array([0, 1, 2, 0, 2, 1])
+
+
+def test_metrics_multiclass_hand_made():
+    m = R.metrics_multiclass(P3, L3)
+    assert m["threshold"] is None and m["top5_accuracy"] is None and m["num_classes"] == 3 and m["n"] == 6
+    assert m["accuracy"] == pytest.approx(4 / 6)
+    # class 0: F1 1; class 1: tp1 fp1 fn1 -> 0.5; class 2: tp1 fp1 fn1 -> 0.5
+    assert m["per_class_f1"] == pytest.approx([1.0, 0.5, 0.5])
+    assert m["macro_f1"] == pytest.approx(2 / 3) and m["f1"] == m["macro_f1"]
+    assert m["precision"] == m["macro_precision"] and m["recall"] == m["macro_recall"]
+    assert m["macro_precision"] == pytest.approx(2 / 3) and m["macro_recall"] == pytest.approx(2 / 3)
+    assert m["weighted_f1"] == pytest.approx(2 / 3)
+    assert np.asarray(m["confusion"]).shape == (3, 3) and m["confusion"] == [[2, 0, 0], [0, 1, 1], [0, 1, 1]]
+    assert m["frac_pmax_over_095"] == 0.0
+    # metrics_at ignores the threshold on 2-D probs; best_threshold returns it with n_thresholds_tied 0
+    assert R.metrics_at(P3, L3, 0.5) == m
+    bt = R.best_threshold(P3, L3)
+    assert bt["n_thresholds_tied"] == 0 and bt["threshold"] is None and bt["macro_f1"] == m["macro_f1"]
+    # top-5 appears (and is 1 here) once C > 5; the confusion matrix stops at 50 classes
+    p8 = np.zeros((4, 8)); p8[np.arange(4), [0, 1, 2, 3]] = 0.5
+    m8 = R.metrics_multiclass(p8, np.array([0, 1, 2, 3]))
+    assert m8["top5_accuracy"] == 1.0 and m8["accuracy"] == 1.0 and "confusion" in m8
+    p60 = np.zeros((2, 60)); p60[0, 5] = 1; p60[1, 7] = 1
+    m60 = R.metrics_multiclass(p60, np.array([5, 8]))
+    assert "confusion" not in m60 and m60["accuracy"] == 0.5 and m60["frac_pmax_over_095"] == 1.0
 
 
 @pytest.mark.parametrize("model_type", ["codebert", "hybrid", "graph_only"])
@@ -160,6 +275,121 @@ def test_end_to_end_train_then_test(data_root):
     with pytest.raises(RuntimeError):
         R.main(["--mode", "train", "--model_type", "hybrid", "--seeds", "0"] + common)
     R.main(["--mode", "train", "--model_type", "hybrid", "--seeds", "0", "--overwrite"] + common)
+
+
+def _hist(d):
+    return [json.loads(l) for l in (d / "history.jsonl").read_text().splitlines()]
+
+
+@pytest.mark.parametrize("model_type", ["graph_only", "codebert"])
+def test_multiclass_end_to_end(data_root3, model_type):
+    """3 classes inferred from input/manifest.json: argmax metrics, [N, 3] probabilities, no threshold."""
+    runs = data_root3 / "runs"
+    common = ["--data_root", str(data_root3), "--runs_dir", str(runs), "--epochs", "2", "--patience", "5",
+              "--hidden_dim", "16", "--rgcn_layers", "1", "--fusion_layers", "1", "--batch_sizes", "8",
+              "--eval_batch_size", "8", "--seeds", "0"]
+    R.main(["--mode", "train", "--model_type", model_type] + common)
+    d = runs / f"{model_type}_bs8_lr1.0e-04_br0.30_seed0"
+    for f in ("args.json", "history.jsonl", "best.pth", "metrics.json", "val_preds.npz", "test_preds.npz", "curves.png"):
+        assert (d / f).exists(), f
+    meta = json.loads((d / "args.json").read_text())
+    assert meta["num_classes"] == 3 and meta["graph_unit"] == "whole_file" and meta["dataset"] == "bigvul"
+    assert meta["data_root"] == str(data_root3.resolve()) and meta["input_manifest"]["num_classes"] == 3
+    assert set(meta["class_counts"]) == {"0", "1", "2"} and len(meta["alpha"]) == 3
+    m = json.loads((d / "metrics.json").read_text())
+    assert m["num_classes"] == 3
+    for k in ("val_05", "val_tuned", "test_05", "test_tuned"):
+        assert m[k]["threshold"] is None and "macro_f1" in m[k] and m[k]["num_classes"] == 3
+    assert m["test_tuned"]["macro_f1"] == m["test_tuned"]["f1"] and m["val_tuned"]["n_thresholds_tied"] == 0
+    assert m["test_tuned"] == m["test_05"]           # argmax: no threshold to tune
+    assert {"val_loss", "test_loss", "best_epoch", "best_val_selection_f1", "select_on"} <= set(m)
+    npz = np.load(d / "test_preds.npz")
+    assert npz["probs"].shape == (16, 3) and np.allclose(npz["probs"].sum(1), 1.0, atol=1e-5)
+    assert len(set(npz["idx"].tolist())) == 16
+    hist = _hist(d)
+    assert len(hist) == 2
+    for h in hist:
+        assert h["val_threshold"] is None and {"val_macro_f1", "val_accuracy", "val_top5", "val_f1_tuned"} <= set(h)
+        assert h["val_top5"] is None and h["val_macro_f1"] == h["val_f1_tuned"] and h["p1_meaning"] == "max_class_probability"
+        assert 1 / 3 - 1e-9 <= h["mean_p1"] <= 1.0
+    # --mode test reproduces the probabilities
+    p1 = npz["probs"].copy()
+    R.main(["--mode", "test", "--data_root", str(data_root3), "--run_dir", str(d), "--eval_batch_size", "4"])
+    p2 = np.load(d / "test_preds.npz")["probs"]
+    assert p2.shape == (16, 3) and np.allclose(p1, p2, atol=1e-6)
+    m2 = json.loads((d / "metrics.json").read_text())
+    assert m2["reevaluated"] and m2["num_classes"] == 3 and m2["best_epoch"] == m["best_epoch"]
+    # a different data_root is refused unless explicitly allowed
+    other = data_root3.parent / "other"
+    _make_root3(other, with_manifest=True)
+    with pytest.raises(RuntimeError, match="different data_root"):
+        R.main(["--mode", "test", "--data_root", str(other), "--run_dir", str(d), "--eval_batch_size", "8"])
+    R.main(["--mode", "test", "--data_root", str(other), "--run_dir", str(d), "--eval_batch_size", "8",
+            "--allow_other_data_root"])
+    # --num_classes equal to the manifest is fine, a different value is refused
+    with pytest.raises(RuntimeError, match="contradicts"):
+        R.main(["--mode", "train", "--model_type", model_type, "--num_classes", "4", "--overwrite"] + common)
+
+
+def test_multiclass_via_num_classes_flag_and_select_on(data_root3_nomanifest):
+    """Without a manifest --num_classes is the source; selection on accuracy / macro_f1 works."""
+    root = data_root3_nomanifest
+    runs = root / "runs"
+    common = ["--data_root", str(root), "--runs_dir", str(runs), "--epochs", "2", "--patience", "5",
+              "--hidden_dim", "16", "--rgcn_layers", "1", "--batch_sizes", "8", "--eval_batch_size", "8", "--seeds", "0"]
+    R.main(["--mode", "train", "--model_type", "graph_only", "--num_classes", "3", "--select_on", "accuracy",
+            "--run_prefix", "toy3_"] + common)
+    d = runs / "toy3_graph_only_bs8_lr1.0e-04_br0.30_seed0"
+    assert d.exists() and sorted(p.name for p in runs.iterdir()) == [d.name]
+    m = json.loads((d / "metrics.json").read_text())
+    assert m["num_classes"] == 3 and m["select_on"] == "accuracy" and np.load(d / "test_preds.npz")["probs"].shape == (16, 3)
+    meta = json.loads((d / "args.json").read_text())
+    assert meta["num_classes"] == 3 and meta["graph_unit"] == "first_method" and meta["input_manifest"] is None
+    hist = _hist(d)
+    assert m["best_val_selection_f1"] == max(h["val_accuracy"] for h in hist)
+    R.main(["--mode", "train", "--model_type", "graph_only", "--num_classes", "3", "--select_on", "macro_f1",
+            "--run_prefix", "sel_"] + common)
+    hist2 = _hist(runs / "sel_graph_only_bs8_lr1.0e-04_br0.30_seed0")
+    m2 = json.loads((runs / "sel_graph_only_bs8_lr1.0e-04_br0.30_seed0" / "metrics.json").read_text())
+    assert m2["best_val_selection_f1"] == max(h["val_macro_f1"] for h in hist2)
+
+
+def test_run_prefix_and_binary_select_on(data_root):
+    runs = data_root / "runs"
+    common = ["--data_root", str(data_root), "--runs_dir", str(runs), "--epochs", "1", "--patience", "5",
+              "--hidden_dim", "16", "--rgcn_layers", "1", "--batch_sizes", "8", "--eval_batch_size", "8", "--seeds", "0"]
+    R.main(["--mode", "train", "--model_type", "graph_only", "--run_prefix", "bigvul_"] + common)
+    names = sorted(p.name for p in runs.iterdir())
+    assert names == ["bigvul_graph_only_bs8_lr1.0e-04_br0.30_seed0"]
+    assert names[0].startswith("bigvul_")
+    meta = json.loads((runs / names[0] / "args.json").read_text())
+    assert meta["num_classes"] == 2 and meta["data_root"] == str(data_root.resolve()) and meta["input_manifest"] is None
+    m = json.loads((runs / names[0] / "metrics.json").read_text())
+    assert m["num_classes"] == 2 and np.load(runs / names[0] / "test_preds.npz")["probs"].ndim == 1
+    # binary history schema unchanged (no multi-class keys leak in)
+    h = _hist(runs / names[0])[0]
+    assert not ({"val_macro_f1", "val_accuracy", "val_top5", "p1_meaning"} & set(h))
+    # accuracy selection is allowed on the binary task, macro_f1 is not
+    R.main(["--mode", "train", "--model_type", "graph_only", "--run_prefix", "acc_", "--select_on", "accuracy"] + common)
+    with pytest.raises(RuntimeError, match="macro_f1"):
+        R.main(["--mode", "train", "--model_type", "graph_only", "--run_prefix", "mf_", "--select_on", "macro_f1"] + common)
+
+
+def test_load_input_manifest_defaults_and_conflicts(data_root, data_root3):
+    args = R.build_parser().parse_args(["--data_root", str(data_root)])
+    assert R.load_input_manifest(args) == (3, 768, 2)                       # no manifest, no flag -> binary
+    args = R.build_parser().parse_args(["--data_root", str(data_root), "--num_classes", "3"])
+    assert R.load_input_manifest(args) == (3, 768, 3)                       # no manifest -> the flag
+    (data_root / "input" / "manifest.json").write_text(json.dumps({"num_relations": 6, "node_feat_dim": 768}))
+    args = R.build_parser().parse_args(["--data_root", str(data_root)])
+    assert R.load_input_manifest(args) == (6, 768, 2)                       # old manifest: num_classes absent -> 2
+    args = R.build_parser().parse_args(["--data_root", str(data_root3)])
+    assert R.load_input_manifest(args) == (3, 768, 3)
+    args = R.build_parser().parse_args(["--data_root", str(data_root3), "--num_classes", "3"])
+    assert R.load_input_manifest(args) == (3, 768, 3)
+    args = R.build_parser().parse_args(["--data_root", str(data_root3), "--num_classes", "2"])
+    with pytest.raises(RuntimeError, match="contradicts"):
+        R.load_input_manifest(args)
 
 
 def test_shuffle_edges_control_is_reproducible_across_reloads(data_root):

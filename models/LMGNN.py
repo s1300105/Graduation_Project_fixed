@@ -95,10 +95,12 @@ class BertRGCN(nn.Module):
                  rgcn_residual: bool = True, input_norm: bool = True, use_node_labels: bool = True,
                  use_gate: bool = True, gate_temperature: float = 1.0, cls_skip: bool = True,
                  graph_only: bool = False, shuffle_edges: bool = False, tune_last_n_layers: int = 2,
-                 max_length: int = 512, model_name: str = CODEBERT, device=None, seed: int = 0):
+                 max_length: int = 512, model_name: str = CODEBERT, device=None, seed: int = 0,
+                 num_classes: int = 2):
         super().__init__()
         self.device = device or torch.device("cpu")
         self.hidden_dim = hidden_dim
+        self.num_classes = int(num_classes)
         self.graph_only = graph_only
         self.cls_skip = cls_skip and not graph_only
         self.shuffle_edges = shuffle_edges
@@ -141,9 +143,9 @@ class BertRGCN(nn.Module):
             )
             head_in = hidden_dim + (code_dim if self.cls_skip else 0)
         self.classifier = nn.Sequential(
-            nn.Linear(head_in, hidden_dim), nn.ReLU(), nn.Dropout(0.2), nn.Linear(hidden_dim, 2),
+            nn.Linear(head_in, hidden_dim), nn.ReLU(), nn.Dropout(0.2), nn.Linear(hidden_dim, self.num_classes),
         )
-        self.last_gate = None   # [B, 2] tensor from the last forward (hybrid with gate) or None
+        self.last_gate = None   # [B, 2] tensor from the last forward (hybrid with gate) or None; 2 = modalities
 
     # -- pieces --
     def encode_text(self, funcs):
@@ -204,15 +206,16 @@ class CodeBERTOnly(nn.Module):
     """Baseline: fine-tuned CodeBERT CLS -> MLP (identical text recipe)."""
 
     def __init__(self, device=None, tune_last_n_layers: int = 2, max_length: int = 512,
-                 hidden_dim: int = 200, model_name: str = CODEBERT):
+                 hidden_dim: int = 200, model_name: str = CODEBERT, num_classes: int = 2):
         super().__init__()
         self.device = device or torch.device("cpu")
         self.max_length = max_length
+        self.num_classes = int(num_classes)
         self.func_tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.func_encoder = CodeBERTEncoder(model_name=model_name, tune_last_n_layers=tune_last_n_layers)
         self.classifier = nn.Sequential(
             nn.Linear(self.func_encoder.hidden_size, hidden_dim), nn.ReLU(), nn.Dropout(0.2),
-            nn.Linear(hidden_dim, 2),
+            nn.Linear(hidden_dim, self.num_classes),
         )
         self.last_gate = None
 
@@ -236,21 +239,26 @@ def build_model(model_type: str, device, *, num_relations: int = 3, node_feat_di
                 hidden_dim: int = 200, num_rgcn_layers: int = 6, fusion_layers: int = 3,
                 tune_last_n_layers: int = 2, max_length: int = 512, ablation: str = "none",
                 gate_temperature: float = 1.0, rgcn_residual: bool = True, input_norm: bool = True,
-                use_node_labels: bool = True, seed: int = 0):
+                use_node_labels: bool = True, seed: int = 0, num_classes: int = 2):
     """model_type: hybrid | codebert | graph_only.
     ablation: none | no_gate | no_cls_skip | shuffle_edges | no_input_norm | no_residual
-    (no_gate / no_cls_skip need the fusion, i.e. the hybrid; codebert takes none)."""
+    (no_gate / no_cls_skip need the fusion, i.e. the hybrid; codebert takes none).
+    num_classes: width of the classifier's last layer (2 = BigVul-style binary,
+    softmax P(y=1) is reported; C > 2 = multi-class, argmax is reported)."""
     if ablation not in ABLATIONS:
         raise ValueError(f"unknown ablation {ablation}")
+    if int(num_classes) < 2:
+        raise ValueError(f"num_classes must be >= 2, got {num_classes}")
     if model_type == "codebert":
         if ablation != "none":
             raise ValueError("ablations apply to hybrid / graph_only only; the CodeBERT baseline has no graph branch")
         return CodeBERTOnly(device=device, tune_last_n_layers=tune_last_n_layers,
-                            max_length=max_length, hidden_dim=hidden_dim).to(device)
+                            max_length=max_length, hidden_dim=hidden_dim, num_classes=num_classes).to(device)
     kw = dict(node_feat_dim=node_feat_dim, hidden_dim=hidden_dim, num_rgcn_layers=num_rgcn_layers,
               num_relations=num_relations, fusion_layers=fusion_layers, tune_last_n_layers=tune_last_n_layers,
               max_length=max_length, device=device, gate_temperature=gate_temperature,
-              rgcn_residual=rgcn_residual, input_norm=input_norm, use_node_labels=use_node_labels, seed=seed)
+              rgcn_residual=rgcn_residual, input_norm=input_norm, use_node_labels=use_node_labels, seed=seed,
+              num_classes=num_classes)
     if model_type == "graph_only":
         if ablation in ("no_gate", "no_cls_skip"):
             raise ValueError(f"ablation {ablation} needs the fusion module; graph_only has none")

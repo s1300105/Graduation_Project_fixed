@@ -8,6 +8,12 @@ Stages
   --mode train : train one or more (config x seed) runs, each written to runs/<run_name>/
   --mode test  : evaluate a finished run on the test split
 
+Tasks: binary (num_classes == 2; BigVul / Devign style, P(y=1) + validation-tuned
+threshold, the original code path, kept bit-identical) and multi-class
+(num_classes > 2; POJ-104 / CodeNet style, argmax, macro-F1 / accuracy, no threshold).
+``--graph_unit whole_file`` keeps Joern's per-file ``<global>`` graph (the whole
+program) instead of the first real method.
+
 Changes relative to the thesis code are listed in README.md (mapped to audit ids).
 """
 import argparse
@@ -96,18 +102,37 @@ class FocalLoss(nn.Module):
 
 
 def build_criterion(name: str, class_counts, gamma: float, device):
-    cnt0, cnt1 = class_counts
-    total = max(1, cnt0 + cnt1)
-    if cnt0 > 0 and cnt1 > 0:
-        alpha = torch.tensor([0.5 / (cnt0 / total), 0.5 / (cnt1 / total)], dtype=torch.float32)
+    """``class_counts``: one training count per class (length C >= 2).
+
+    alpha_c = (1 / C) / (count_c / total), i.e. inverse frequency normalised so
+    that a balanced set gives all ones. The two-class expression is kept
+    literally (0.5 / (cnt / total)) because the BigVul runs depend on it
+    bit-for-bit. A class with no training sample gets alpha 1.0 (it never
+    contributes to the loss) and a warning; the other classes keep their weight."""
+    class_counts = tuple(class_counts)
+    if len(class_counts) == 2:
+        cnt0, cnt1 = class_counts
+        total = max(1, cnt0 + cnt1)
+        if cnt0 > 0 and cnt1 > 0:
+            alpha = torch.tensor([0.5 / (cnt0 / total), 0.5 / (cnt1 / total)], dtype=torch.float32)
+        else:
+            alpha = torch.tensor([1.0, 1.0], dtype=torch.float32)
+    elif len(class_counts) > 2:
+        C = len(class_counts)
+        total = max(1, sum(int(c) for c in class_counts))
+        if any(int(c) <= 0 for c in class_counts):
+            print(f"[WARN] {sum(1 for c in class_counts if int(c) <= 0)} of {C} classes have no training sample; "
+                  f"their alpha is set to 1.0")
+        alpha = torch.tensor([(1.0 / C) / (int(c) / total) if int(c) > 0 else 1.0 for c in class_counts],
+                             dtype=torch.float32)
     else:
-        alpha = torch.tensor([1.0, 1.0], dtype=torch.float32)
+        raise ValueError(f"class_counts needs at least two classes, got {class_counts}")
     if name == "focal":
         return FocalLoss(alpha=alpha, gamma=gamma).to(device), alpha
     if name == "weighted_ce":
         return nn.CrossEntropyLoss(weight=alpha.to(device)), alpha
     if name == "ce":
-        return nn.CrossEntropyLoss(), torch.tensor([1.0, 1.0])
+        return nn.CrossEntropyLoss(), torch.ones(len(class_counts))
     raise ValueError(name)
 
 
@@ -191,17 +216,35 @@ def make_loader(input_dir, split, *, batch_size, shuffle, seed, max_samples=None
     return loader, ds
 
 
-def count_targets(files):
-    cnt0 = cnt1 = 0
+def count_targets(files, num_classes: int = 2):
+    """Per-class counts of the rows that carry a graph, as a tuple of C ints.
+    Two classes: the original path (targets clipped to {0, 1}). C > 2: bincount;
+    a label outside 0..C-1 raises instead of being clipped, because a silently
+    clipped label would re-weight and mis-score the run without any trace."""
+    if int(num_classes) == 2:
+        cnt0 = cnt1 = 0
+        for fn in files:
+            df = pd.read_pickle(fn)
+            if "target" in df.columns:
+                m = df["input"].notna() if "input" in df.columns else slice(None)
+                vals = df.loc[m, "target"].astype("int64").clip(0, 1)
+                cnt1 += int(vals.sum())
+                cnt0 += int(len(vals) - vals.sum())
+            del df
+        return cnt0, cnt1
+    C = int(num_classes)
+    counts = np.zeros(C, dtype=np.int64)
     for fn in files:
         df = pd.read_pickle(fn)
         if "target" in df.columns:
             m = df["input"].notna() if "input" in df.columns else slice(None)
-            vals = df.loc[m, "target"].astype("int64").clip(0, 1)
-            cnt1 += int(vals.sum())
-            cnt0 += int(len(vals) - vals.sum())
+            vals = df.loc[m, "target"].astype("int64").to_numpy()
+            if len(vals) and (vals.min() < 0 or vals.max() >= C):
+                raise ValueError(f"{fn}: target outside 0..{C - 1} (min {int(vals.min())}, max {int(vals.max())}); "
+                                 f"check --num_classes / input/manifest.json")
+            counts += np.bincount(vals, minlength=C)
         del df
-    return cnt0, cnt1
+    return tuple(int(c) for c in counts)
 
 
 # ============================================================================
@@ -212,23 +255,74 @@ def predict(model, loader, device):
     model.eval()
     probs, labels, idxs = [], [], []
     loss_sum, n = 0.0, 0
+    n_classes = None
     for batch in loader:
         batch = batch.to(device)
         logits = model(batch)
         y = batch.y.view(-1).long()
         loss_sum += F.cross_entropy(logits, y, reduction="sum").item()
         n += y.numel()
-        probs.extend(F.softmax(logits, dim=-1)[:, 1].cpu().tolist())
+        n_classes = int(logits.size(-1))
+        if n_classes == 2:
+            probs.extend(F.softmax(logits, dim=-1)[:, 1].cpu().tolist())      # 1-D P(y=1)
+        else:
+            probs.extend(F.softmax(logits, dim=-1).cpu().tolist())            # rows -> [N, C]
         labels.extend(y.cpu().tolist())
         bidx = getattr(batch, "idx", None)
         if bidx is None:
             idxs.extend([-1] * y.numel())
         else:
             idxs.extend([int(v) for v in (bidx.tolist() if torch.is_tensor(bidx) else bidx)])
-    return np.asarray(probs), np.asarray(labels), np.asarray(idxs), loss_sum / max(1, n)
+    if n_classes is not None and n_classes != 2:
+        probs = np.asarray(probs, dtype=np.float64).reshape(-1, n_classes)
+    else:
+        probs = np.asarray(probs)
+    return probs, np.asarray(labels), np.asarray(idxs), loss_sum / max(1, n)
 
 
-def metrics_at(probs, labels, t: float):
+def metrics_multiclass(probs, labels):
+    """Argmax metrics for ``probs`` of shape [N, C] (C > 2). Macro averages run
+    over all C classes (fixed denominator, so epochs and runs are comparable
+    even when a class is missing from a split; an absent class contributes 0).
+    ``f1`` / ``precision`` / ``recall`` alias the macro values so that the
+    selection, printing and plotting code written for the binary task works;
+    ``threshold`` is None (no threshold is tuned). ``frac_pmax_over_095``
+    monitors saturation of the max-class probability."""
+    probs = np.asarray(probs, dtype=np.float64)
+    labels = np.asarray(labels).astype(int)
+    C = int(probs.shape[1])
+    preds = probs.argmax(axis=1)
+    cls = list(range(C))
+    per_class_f1 = f1_score(labels, preds, labels=cls, average=None, zero_division=0)
+    out = {
+        "threshold": None,
+        "accuracy": float(accuracy_score(labels, preds)) if len(labels) else 0.0,
+        "macro_f1": float(np.mean(per_class_f1)),
+        "weighted_f1": float(f1_score(labels, preds, labels=cls, average="weighted", zero_division=0)) if len(labels) else 0.0,
+        "macro_precision": float(precision_score(labels, preds, labels=cls, average="macro", zero_division=0)),
+        "macro_recall": float(recall_score(labels, preds, labels=cls, average="macro", zero_division=0)),
+    }
+    out["f1"], out["precision"], out["recall"] = out["macro_f1"], out["macro_precision"], out["macro_recall"]
+    if C > 5 and len(labels):
+        top5 = np.argsort(-probs, axis=1)[:, :5]
+        out["top5_accuracy"] = float((top5 == labels[:, None]).any(axis=1).mean())
+    else:
+        out["top5_accuracy"] = None
+    out["n"] = int(len(labels))
+    out["num_classes"] = C
+    out["per_class_f1"] = [float(v) for v in per_class_f1]
+    out["frac_pmax_over_095"] = float((probs.max(axis=1) > 0.95).mean()) if len(labels) else 0.0
+    if C <= 50:
+        out["confusion"] = confusion_matrix(labels, preds, labels=cls).tolist()
+    return out
+
+
+def metrics_at(probs, labels, t):
+    """Binary: metrics at threshold ``t`` on the 1-D P(y=1). Multi-class
+    (``probs.ndim == 2``): argmax metrics, ``t`` is ignored."""
+    probs = np.asarray(probs)
+    if probs.ndim == 2:
+        return metrics_multiclass(probs, labels)
     preds = (probs >= t).astype(int)
     cm = confusion_matrix(labels, preds, labels=[0, 1])
     return {
@@ -248,7 +342,14 @@ THRESHOLDS = np.linspace(0.05, 0.95, 19)
 def best_threshold(probs, labels):
     """Threshold on the 0.05..0.95 grid maximising F1. Ties (e.g. saturated
     probabilities, where many thresholds give the same F1) are broken toward
-    0.5; the number of tied thresholds is reported so saturation is visible."""
+    0.5; the number of tied thresholds is reported so saturation is visible.
+    Multi-class probabilities ([N, C]) have no threshold: the argmax metrics are
+    returned with ``threshold`` None and ``n_thresholds_tied`` 0."""
+    probs = np.asarray(probs)
+    if probs.ndim == 2:
+        best = metrics_multiclass(probs, labels)
+        best["n_thresholds_tied"] = 0
+        return best
     cands = [metrics_at(probs, labels, float(t)) for t in THRESHOLDS]
     top = max(round(m["f1"], 12) for m in cands)
     tied = [m for m in cands if round(m["f1"], 12) == top]
@@ -325,7 +426,12 @@ def make_optimizer(model, lr, bert_lr, weight_decay):
 
 def run_name_for(args, batch_size, lr, ratio, seed):
     tag = args.model_type + ("" if args.ablation == "none" else f"-{args.ablation}")
-    return f"{tag}_bs{batch_size}_lr{lr:.1e}_br{ratio:.2f}_seed{seed}"
+    prefix = getattr(args, "run_prefix", "") or ""
+    return f"{prefix}{tag}_bs{batch_size}_lr{lr:.1e}_br{ratio:.2f}_seed{seed}"
+
+
+def _fmt_thr(t):
+    return "argmax" if t is None else f"{t:.2f}"
 
 
 def plot_curves(run_dir: Path):
@@ -338,16 +444,25 @@ def plot_curves(run_dir: Path):
     hist = [json.loads(l) for l in (run_dir / "history.jsonl").read_text().splitlines() if l.strip()]
     if not hist:
         return
-    ep = [h["epoch"] for h in hist]
+    ep = [h.get("epoch") for h in hist]
     fig, axes = plt.subplots(1, 3, figsize=(15, 4))
-    axes[0].plot(ep, [h["train_loss"] for h in hist], label="train (criterion)")
-    axes[0].plot(ep, [h["val_loss"] for h in hist], label="val (CE)")
+    axes[0].plot(ep, [h.get("train_loss") for h in hist], label="train (criterion)")
+    axes[0].plot(ep, [h.get("val_loss") for h in hist], label="val (CE)")
     axes[0].set_title("loss"); axes[0].legend()
-    axes[1].plot(ep, [h["val_f1_tuned"] for h in hist], label="val F1 (tuned thr)")
-    axes[1].plot(ep, [h["val_f1_05"] for h in hist], label="val F1 @0.5")
-    axes[1].plot(ep, [h["val_precision_tuned"] for h in hist], label="val P (tuned)")
-    axes[1].plot(ep, [h["val_recall_tuned"] for h in hist], label="val R (tuned)")
-    axes[1].set_title("validation"); axes[1].legend()
+    if hist[0].get("val_threshold") is None:       # multi-class: argmax metrics, no threshold
+        axes[1].plot(ep, [h.get("val_macro_f1") for h in hist], label="val macro-F1 (argmax)")
+        axes[1].plot(ep, [h.get("val_accuracy") for h in hist], label="val accuracy (argmax)")
+        if any(h.get("val_top5") is not None for h in hist):
+            axes[1].plot(ep, [h.get("val_top5") for h in hist], label="val top-5 accuracy")
+        axes[1].plot(ep, [h.get("val_precision_tuned") for h in hist], label="val macro-P")
+        axes[1].plot(ep, [h.get("val_recall_tuned") for h in hist], label="val macro-R")
+        axes[1].set_title("validation (multi-class, argmax)"); axes[1].legend()
+    else:
+        axes[1].plot(ep, [h.get("val_f1_tuned") for h in hist], label="val F1 (tuned thr)")
+        axes[1].plot(ep, [h.get("val_f1_05") for h in hist], label="val F1 @0.5")
+        axes[1].plot(ep, [h.get("val_precision_tuned") for h in hist], label="val P (tuned)")
+        axes[1].plot(ep, [h.get("val_recall_tuned") for h in hist], label="val R (tuned)")
+        axes[1].set_title("validation"); axes[1].legend()
     if any(h.get("gate_code") is not None for h in hist):
         axes[2].plot(ep, [h.get("gate_code") for h in hist], marker="o", label="gate: code")
         axes[2].plot(ep, [h.get("gate_graph") for h in hist], marker="x", label="gate: graph")
@@ -360,8 +475,13 @@ def plot_curves(run_dir: Path):
     plt.close(fig)
 
 
-def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_feat_dim):
+def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_feat_dim, num_classes=2):
     set_seed(seed, deterministic=not args.no_deterministic)
+    num_classes = int(num_classes)
+    multiclass = num_classes != 2
+    if not multiclass and args.select_on == "macro_f1":
+        raise RuntimeError("--select_on macro_f1 is defined for multi-class runs; the binary task selects on "
+                           "tuned / f1_05 / accuracy")
     input_dir = Path(args.data_root) / "input"
     run_dir = Path(args.runs_dir) / run_name_for(args, batch_size, lr, ratio, seed)
     if (run_dir / "args.json").exists() and not args.overwrite:
@@ -370,8 +490,8 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
     train_files = split_files(input_dir, "train")
     if not train_files:
         raise RuntimeError(f"no train_*_input.pkl under {input_dir}; run --cpg and --embed first")
-    cnt0, cnt1 = count_targets(train_files)
-    total = cnt0 + cnt1
+    class_counts = count_targets(train_files, num_classes)
+    total = sum(class_counts)
     max_samples = None if args.subset_frac >= 1.0 else max(1, int(total * args.subset_frac))
 
     train_loader, train_ds = make_loader(input_dir, "train", batch_size=batch_size, shuffle=True, seed=seed,
@@ -388,11 +508,11 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
                         hidden_dim=args.hidden_dim, num_rgcn_layers=args.rgcn_layers,
                         fusion_layers=args.fusion_layers, tune_last_n_layers=args.tune_last_n_layers,
                         max_length=args.max_length, ablation=args.ablation,
-                        gate_temperature=args.gate_temperature, seed=seed)
+                        gate_temperature=args.gate_temperature, seed=seed, num_classes=num_classes)
     n_new = sum(p.numel() for n, p in model.named_parameters() if "func_encoder" not in n)
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
-    criterion, alpha = build_criterion(args.loss, (cnt0, cnt1), args.focal_gamma, device)
+    criterion, alpha = build_criterion(args.loss, class_counts, args.focal_gamma, device)
     optimizer = make_optimizer(model, lr, lr * ratio, args.weight_decay)
     steps_per_epoch = math.ceil((max_samples or total) / batch_size)
     total_steps = steps_per_epoch * args.epochs
@@ -401,18 +521,28 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
         from transformers import get_linear_schedule_with_warmup
         scheduler = get_linear_schedule_with_warmup(optimizer, int(args.warmup_ratio * total_steps), total_steps)
 
+    manifest_path = input_dir / "manifest.json"
+    input_manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
     meta = {
         "args": vars(args), "batch_size": batch_size, "lr": lr, "bert_lr_ratio": ratio, "seed": seed,
-        "git_commit": git_commit(), "class_counts": {"0": cnt0, "1": cnt1}, "alpha": alpha.tolist(),
+        "git_commit": git_commit(), "class_counts": {str(i): int(c) for i, c in enumerate(class_counts)},
+        "alpha": alpha.tolist(),
         "train_samples_per_epoch": max_samples or total, "num_relations": num_relations,
-        "node_feat_dim": node_feat_dim, "params_trainable": n_train, "params_new_non_codebert": n_new,
+        "node_feat_dim": node_feat_dim, "num_classes": num_classes,
+        "dataset": args.dataset, "data_root": str(Path(args.data_root).resolve()),
+        "graph_unit": (input_manifest or {}).get("graph_unit", getattr(args, "graph_unit", "first_method")),
+        "input_manifest": input_manifest,
+        "params_trainable": n_train, "params_new_non_codebert": n_new,
         "device": str(device), "torch": torch.__version__,
     }
     (run_dir / "args.json").write_text(json.dumps(meta, indent=1, ensure_ascii=False))
     hist_path = run_dir / "history.jsonl"
     hist_path.write_text("")
-    print(f"[RUN] {run_dir.name}: train {cnt0}+{cnt1} (per epoch {max_samples or total}), "
-          f"new params {n_new:,}, trainable {n_train:,}, alpha={alpha.tolist()}")
+    counts_str = "+".join(str(c) for c in class_counts) if num_classes <= 10 else \
+        f"{total} over {num_classes} classes (min {min(class_counts)}, max {max(class_counts)})"
+    print(f"[RUN] {run_dir.name}: train {counts_str} (per epoch {max_samples or total}), "
+          f"new params {n_new:,}, trainable {n_train:,}, "
+          + (f"alpha={alpha.tolist()}" if num_classes <= 10 else f"alpha in [{alpha.min():.3f}, {alpha.max():.3f}]"))
 
     best_f1, best_epoch, wait = -1.0, -1, 0
     t0 = time.time()
@@ -420,23 +550,47 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
         train_ds.set_epoch(epoch)
         tr = train_one_epoch(model, train_loader, optimizer, scheduler, criterion, device, args.clip_grad)
         probs, labels, _, val_loss = predict(model, val_loader, device)
-        m05 = metrics_at(probs, labels, 0.5)
-        mt = best_threshold(probs, labels)
+        if multiclass:
+            mt = best_threshold(probs, labels)          # argmax metrics, threshold None, f1 = macro-F1
+            m05 = mt
+            p_stat = probs.max(axis=1)                  # mean_p1 / frac_p1_mid refer to the max-class probability
+        else:
+            m05 = metrics_at(probs, labels, 0.5)
+            mt = best_threshold(probs, labels)
+            p_stat = probs
         rec = {
             "epoch": epoch, "train_loss": tr["train_loss"], "val_loss": val_loss,
             "val_f1_05": m05["f1"], "val_precision_05": m05["precision"], "val_recall_05": m05["recall"],
             "val_f1_tuned": mt["f1"], "val_precision_tuned": mt["precision"], "val_recall_tuned": mt["recall"],
             "val_threshold": mt["threshold"], "gate_code": tr["gate_code"], "gate_graph": tr["gate_graph"],
             "oom_skipped": tr["oom_skipped"], "lr": optimizer.param_groups[0]["lr"],
-            "mean_p1": float(probs.mean()), "frac_p1_mid": float(((probs > 0.05) & (probs < 0.95)).mean()),
+            "mean_p1": float(p_stat.mean()), "frac_p1_mid": float(((p_stat > 0.05) & (p_stat < 0.95)).mean()),
             "elapsed_s": time.time() - t0,
         }
+        if multiclass:      # extra keys only here: the binary history schema is frozen (golden test)
+            rec.update({"val_accuracy": mt["accuracy"], "val_macro_f1": mt["macro_f1"], "val_top5": mt["top5_accuracy"],
+                        "p1_meaning": "max_class_probability"})
         with hist_path.open("a") as fh:
             fh.write(json.dumps(rec) + "\n")
-        print(f"[E{epoch:03d}] loss {tr['train_loss']:.4f} | val CE {val_loss:.4f} F1@0.5 {m05['f1']:.4f} "
-              f"F1*={mt['f1']:.4f}@{mt['threshold']:.2f} P {mt['precision']:.3f} R {mt['recall']:.3f}"
-              + (f" | gate code {tr['gate_code']:.2f}" if tr["gate_code"] is not None else ""))
-        selection = mt["f1"] if args.select_on == "tuned" else m05["f1"]
+        if multiclass:
+            print(f"[E{epoch:03d}] loss {tr['train_loss']:.4f} | val CE {val_loss:.4f} acc {mt['accuracy']:.4f} "
+                  f"macro-F1 {mt['macro_f1']:.4f} macro-P {mt['precision']:.3f} macro-R {mt['recall']:.3f}"
+                  + (f" top5 {mt['top5_accuracy']:.4f}" if mt["top5_accuracy"] is not None else "")
+                  + (f" | gate code {tr['gate_code']:.2f}" if tr["gate_code"] is not None else ""))
+        else:
+            print(f"[E{epoch:03d}] loss {tr['train_loss']:.4f} | val CE {val_loss:.4f} F1@0.5 {m05['f1']:.4f} "
+                  f"F1*={mt['f1']:.4f}@{mt['threshold']:.2f} P {mt['precision']:.3f} R {mt['recall']:.3f}"
+                  + (f" | gate code {tr['gate_code']:.2f}" if tr["gate_code"] is not None else ""))
+        if args.select_on == "tuned":
+            selection = mt["f1"]                        # binary: F1 at the tuned threshold; multi-class: macro-F1
+        elif args.select_on == "f1_05":
+            selection = m05["f1"]
+        elif args.select_on == "accuracy":
+            selection = mt["accuracy"]
+        elif args.select_on == "macro_f1":
+            selection = mt["macro_f1"]
+        else:
+            raise ValueError(f"unknown --select_on {args.select_on}")
         if selection > best_f1 + 1e-4:
             best_f1, best_epoch, wait = selection, epoch, 0
             torch.save(model.state_dict(), run_dir / "best.pth")
@@ -451,18 +605,27 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
     result = evaluate_run(model, run_dir, val_loader, test_loader, device)
     result.update({"best_epoch": best_epoch, "best_val_selection_f1": best_f1, "select_on": args.select_on})
     (run_dir / "metrics.json").write_text(json.dumps(result, indent=1))
-    print(f"[DONE] {run_dir.name}: test F1 {result['test_tuned']['f1']:.4f} (thr {result['test_tuned']['threshold']:.2f}), "
-          f"F1@0.5 {result['test_05']['f1']:.4f}, best epoch {best_epoch}")
+    tt = result["test_tuned"]
+    if multiclass:
+        print(f"[DONE] {run_dir.name}: test accuracy {tt['accuracy']:.4f} macro-F1 {tt['macro_f1']:.4f}"
+              + (f" top5 {tt['top5_accuracy']:.4f}" if tt.get("top5_accuracy") is not None else "")
+              + f", best epoch {best_epoch}")
+    else:
+        print(f"[DONE] {run_dir.name}: test F1 {tt['f1']:.4f} (thr {_fmt_thr(tt['threshold'])}), "
+              f"F1@0.5 {result['test_05']['f1']:.4f}, best epoch {best_epoch}")
     return result
 
 
 def evaluate_run(model, run_dir: Path, val_loader, test_loader, device):
     """Threshold chosen on validation, applied to test; both the fixed 0.5 and
     the tuned threshold are reported, and per-sample test probabilities are
-    saved for paired comparisons (scripts/compare_runs.py)."""
+    saved for paired comparisons (scripts/compare_runs.py). Multi-class runs
+    (probabilities [N, C]) report argmax metrics under the same keys with
+    ``threshold`` None; ``probs`` in the npz files is then 2-D."""
     vp, vl, vi, vloss = predict(model, val_loader, device)
     vt = best_threshold(vp, vl)
-    out = {"val_05": metrics_at(vp, vl, 0.5), "val_tuned": vt, "val_loss": vloss}
+    out = {"val_05": metrics_at(vp, vl, 0.5), "val_tuned": vt, "val_loss": vloss,
+           "num_classes": int(vp.shape[1]) if vp.ndim == 2 else 2}
     np.savez(run_dir / "val_preds.npz", probs=vp, labels=vl, idx=vi)
     if test_loader is not None:
         tp, tl, ti, tloss = predict(model, test_loader, device)
@@ -495,6 +658,9 @@ def cpg_generate(args):
         shutil.rmtree(cpg_dir)
     cpg_dir.mkdir(parents=True)
     manifest = {"args": vars(args), "splits": {}}
+    # whole_file keeps Joern's per-file <global> method (the whole program); passing nothing keeps the
+    # first_method call exactly as before
+    gu = {} if args.graph_unit == "first_method" else {"graph_unit": args.graph_unit}
     for split, path in (("train", args.train_jsonl), ("valid", args.valid_jsonl), ("test", args.test_jsonl)):
         df = read_jsonl(path)
         n_in = len(df)
@@ -507,6 +673,7 @@ def cpg_generate(args):
         if "idx" not in df.columns:
             df["idx"] = df.index
         stats = {"rows_in": n_in, "rows_after_filter": len(df), "positives_after_filter": int(df.target.sum()),
+                 "label_counts": {str(k): int(v) for k, v in df.target.value_counts().sort_index().items()},
                  "slices": 0, "joern_failed_slices": 0, "graphs_written": 0}
         for s, slice_df in dm.slice_frame(df, args.slice_size):
             slice_df = slice_df.copy()
@@ -530,7 +697,7 @@ def cpg_generate(args):
             if not json_file:
                 stats["joern_failed_slices"] += 1
                 continue
-            graphs = cpgproc.json_process(str(cpg_dir), json_file, stats) or []
+            graphs = cpgproc.json_process(str(cpg_dir), json_file, stats, **gu) or []
             right = pd.DataFrame(graphs, columns=["Index", "cpg"]).set_index("Index")
             left = slice_df.set_index("Index", drop=False)
             joined = left.join(right, how="inner")
@@ -541,7 +708,7 @@ def cpg_generate(args):
             # --- rescue pass: functions Joern could not parse as written (macro signatures etc.) ---
             if not args.no_rescue_macros:
                 lost = left.loc[~left.index.isin(joined.index)]
-                for stage in ("A", "B"):
+                for stage in getattr(dm, "RESCUE_STAGES", ("A", "B")):
                     if lost.empty:
                         break
                     variants = {ix: dict(dm.rescue_variants(code)).get(stage) for ix, code in lost["func"].items()}
@@ -563,7 +730,7 @@ def cpg_generate(args):
                         continue
                     rjson = rres.get(rstem + ".bin")
                     if rjson:
-                        rgraphs = cpgproc.json_process(str(cpg_dir), rjson, {}) or []
+                        rgraphs = cpgproc.json_process(str(cpg_dir), rjson, {}, **gu) or []
                         rright = pd.DataFrame(rgraphs, columns=["Index", "cpg"]).set_index("Index")
                         rjoined = lost.loc[lost.index.isin(rright.index)].join(rright, how="inner")  # keeps the ORIGINAL func text
                         if len(rjoined):
@@ -600,16 +767,32 @@ def embed_generate(args):
     done = {p.name.replace("_input.pkl", "") for p in input_dir.glob("*_input.pkl")}
     settings = {"reverse_edges": bool(args.reverse_edges), "max_nodes": int(args.max_nodes),
                 "node_embedding": args.node_embedding, "node_max_len": int(args.node_max_len),
-                "node_code_mode": args.node_code_mode}
+                "node_code_mode": args.node_code_mode, "graph_unit": args.graph_unit}
     manifest_path = input_dir / "manifest.json"
-    counts = {"rows": 0, "graphs": 0, "rows_without_graph": 0, "rows_with_extra_graphs": 0}
+    counts = {"rows": 0, "graphs": 0, "rows_without_graph": 0, "rows_with_extra_graphs": 0, "graphs_at_cap": 0}
     node_sum = edge_sum = 0
     counts_cover = "all"
+    cpg_files = sorted(cpg_dir.glob("*_cpg.pkl"))
+    # label range over ALL cpg rows (also the ones --resume skips), before anything is written
+    t_min, t_max = None, None
+    for pkl in cpg_files:
+        t = pd.read_pickle(pkl)["target"].astype("int64")
+        if len(t):
+            t_min = int(t.min()) if t_min is None else min(t_min, int(t.min()))
+            t_max = int(t.max()) if t_max is None else max(t_max, int(t.max()))
+        del t
+    num_classes = int(args.num_classes) if args.num_classes else max(2, (t_max if t_max is not None else 1) + 1)
+    if t_min is not None and (t_min < 0 or t_max >= num_classes):
+        raise RuntimeError(f"targets range {t_min}..{t_max} but num_classes is {num_classes} "
+                           f"(labels must be 0..{num_classes - 1}; check --num_classes / the dataset's label column)")
     if args.resume:
         if manifest_path.exists():
             prev = json.loads(manifest_path.read_text())
+            if prev.get("num_classes", 2) != num_classes:
+                raise RuntimeError(f"--resume with a different num_classes (stored {prev.get('num_classes', 2)}, now {num_classes})")
             for k, v in settings.items():
-                if prev.get(k) != v:
+                stored = prev.get(k, "first_method" if k == "graph_unit" else None)    # old manifests: first_method
+                if stored != v:
                     raise RuntimeError(f"--resume with a different setting ({k}: stored {prev.get(k)!r}, now {v!r}); "
                                        f"delete {input_dir} or rerun without --resume")
             counts.update({k: int(prev.get("counts", {}).get(k, 0)) for k in counts})
@@ -618,7 +801,7 @@ def embed_generate(args):
         elif done:
             print("[WARN] --resume without a previous manifest: counts will cover this invocation only")
             counts_cover = "this_invocation"
-    for pkl in sorted(cpg_dir.glob("*_cpg.pkl")):
+    for pkl in cpg_files:
         base = pkl.name.replace("_cpg.pkl", "")
         if args.resume and base in done:
             print(f"[RESUME] skip {base}")
@@ -627,7 +810,8 @@ def embed_generate(args):
         rows = []
         for _, row in df.iterrows():
             counts["rows"] += 1
-            funcs = parse_to_functions(row.cpg, max_nodes=args.max_nodes)
+            funcs = parse_to_functions(row.cpg, max_nodes=args.max_nodes,
+                                       skip_global=(args.graph_unit == "first_method"))
             if not funcs:
                 counts["rows_without_graph"] += 1
                 continue
@@ -640,6 +824,8 @@ def embed_generate(args):
             g.func = row.func
             g.idx = int(row["idx"]) if "idx" in row and pd.notna(row["idx"]) else -1
             counts["graphs"] += 1
+            if int(g.num_nodes) >= int(args.max_nodes):
+                counts["graphs_at_cap"] += 1
             node_sum += int(g.num_nodes)
             edge_sum += int(g.edge_index.size(1))
             rows.append({"input": g, "target": int(row.target), "func": row.func, "idx": g.idx,
@@ -652,6 +838,7 @@ def embed_generate(args):
         **settings,
         "num_relations": NUM_RELATIONS * (2 if args.reverse_edges else 1),
         "relations": list(RELATIONS), "node_feat_dim": 768,
+        "num_classes": num_classes, "dataset": args.dataset,
         "counts": counts, "counts_cover": counts_cover, "node_sum": node_sum, "edge_sum": edge_sum,
         "nodes_mean": node_sum / counts["graphs"] if counts["graphs"] else None,
         "edges_mean": edge_sum / counts["graphs"] if counts["graphs"] else None,
@@ -662,11 +849,18 @@ def embed_generate(args):
 
 
 def load_input_manifest(args):
+    """(num_relations, node_feat_dim, num_classes) from input/manifest.json. An
+    old manifest without num_classes is binary (2). --num_classes may repeat the
+    manifest's value but not contradict it; without a manifest it is the source."""
     p = Path(args.data_root) / "input" / "manifest.json"
     if p.exists():
         m = json.loads(p.read_text())
-        return int(m.get("num_relations", NUM_RELATIONS)), int(m.get("node_feat_dim", 768))
-    return args.num_relations, 768
+        num_classes = int(m.get("num_classes", 2))
+        if args.num_classes is not None and int(args.num_classes) != num_classes:
+            raise RuntimeError(f"--num_classes {args.num_classes} contradicts {p} (num_classes {num_classes}); "
+                               f"the inputs were embedded for {num_classes} classes")
+        return int(m.get("num_relations", NUM_RELATIONS)), int(m.get("node_feat_dim", 768)), num_classes
+    return args.num_relations, 768, int(args.num_classes) if args.num_classes else 2
 
 
 # ============================================================================
@@ -681,6 +875,12 @@ def build_parser():
     # data
     p.add_argument("--data_root", default="data")
     p.add_argument("--dataset", default="bigvul", help="prefix of data/cleaned_data/<dataset>_<split>.jsonl")
+    p.add_argument("--num_classes", type=int, default=None,
+                   help="number of classes; default: inferred at --embed (max target + 1, at least 2) and read from "
+                        "input/manifest.json at --mode train. 2 = binary (P(y=1) + tuned threshold), >2 = argmax")
+    p.add_argument("--graph_unit", choices=["first_method", "whole_file"], default="first_method",
+                   help="first_method: the first real method of each source file (BigVul-style single functions); "
+                        "whole_file: Joern's per-file <global> graph, i.e. the whole program (POJ-104 / CodeNet)")
     p.add_argument("--train_jsonl"); p.add_argument("--valid_jsonl"); p.add_argument("--test_jsonl")
     p.add_argument("--max_chars", type=int, default=None, help="drop functions with >= this many chars (thesis code: 1200, undisclosed). Default: no filter")
     p.add_argument("--min_chars", type=int, default=0)
@@ -714,7 +914,10 @@ def build_parser():
     p.add_argument("--seeds", type=int, nargs="+", default=[0])
     p.add_argument("--epochs", type=int, default=200)
     p.add_argument("--patience", type=int, default=50)
-    p.add_argument("--select_on", choices=["tuned", "f1_05"], default="tuned", help="validation metric for checkpoint selection")
+    p.add_argument("--select_on", choices=["tuned", "f1_05", "accuracy", "macro_f1"], default="tuned",
+                   help="validation metric for checkpoint selection. Binary: tuned = F1 at the tuned threshold, "
+                        "f1_05 = F1 at 0.5, accuracy = accuracy at the tuned threshold. Multi-class: tuned and "
+                        "macro_f1 = macro-F1 (argmax), f1_05 = the same, accuracy = accuracy")
     p.add_argument("--subset_frac", type=float, default=1.0, help="fraction of the training set used per epoch (resampled every epoch)")
     p.add_argument("--loss", choices=["focal", "weighted_ce", "ce"], default="focal")
     p.add_argument("--focal_gamma", type=float, default=2.0)
@@ -725,8 +928,11 @@ def build_parser():
     p.add_argument("--seed", type=int, default=42, help="seed for data shuffling at --cpg time")
     p.add_argument("--no_deterministic", action="store_true")
     p.add_argument("--runs_dir", default="runs")
+    p.add_argument("--run_prefix", default="", help="prefix of the run directory name, e.g. 'poj104_' (default: none)")
     p.add_argument("--overwrite", action="store_true", help="replace an existing run directory of the same name")
     p.add_argument("--run_dir", help="(--mode test) run directory holding best.pth and args.json")
+    p.add_argument("--allow_other_data_root", action="store_true",
+                   help="(--mode test) evaluate on a --data_root different from the one the run was trained on")
     return p
 
 
@@ -749,25 +955,36 @@ def main(argv=None):
         embed_generate(args)
 
     if args.mode == "train":
-        num_relations, node_feat_dim = load_input_manifest(args)
+        num_relations, node_feat_dim, num_classes = load_input_manifest(args)
+        multiclass = num_classes != 2
         results = []
         for bs in args.batch_sizes:
             for lr in args.lrs:
                 for ratio in args.bert_lr_ratios:
                     for seed in args.seeds:
                         r = train_run(args, device, batch_size=bs, lr=lr, ratio=ratio, seed=seed,
-                                      num_relations=num_relations, node_feat_dim=node_feat_dim)
+                                      num_relations=num_relations, node_feat_dim=node_feat_dim, num_classes=num_classes)
                         results.append((run_name_for(args, bs, lr, ratio, seed), r))
-        print("\n===== SUMMARY (test F1 at validation-tuned threshold) =====")
+        if multiclass:
+            print(f"\n===== SUMMARY ({num_classes} classes, argmax; test macro-F1 / accuracy) =====")
+        else:
+            print("\n===== SUMMARY (test F1 at validation-tuned threshold) =====")
         for name, r in sorted(results, key=lambda x: -x[1]["test_tuned"]["f1"]):
-            print(f"{name}: test F1 {r['test_tuned']['f1']:.4f} (thr {r['test_tuned']['threshold']:.2f}) | "
-                  f"F1@0.5 {r['test_05']['f1']:.4f} | best epoch {r['best_epoch']}")
+            tt = r["test_tuned"]
+            if multiclass:
+                print(f"{name}: test macro-F1 {tt['macro_f1']:.4f} | accuracy {tt['accuracy']:.4f}"
+                      + (f" | top5 {tt['top5_accuracy']:.4f}" if tt.get("top5_accuracy") is not None else "")
+                      + f" | best epoch {r['best_epoch']}")
+            else:
+                print(f"{name}: test F1 {tt['f1']:.4f} (thr {_fmt_thr(tt['threshold'])}) | "
+                      f"F1@0.5 {r['test_05']['f1']:.4f} | best epoch {r['best_epoch']}")
         if len(args.seeds) > 1:
             by_cfg = {}
             for name, r in results:
                 by_cfg.setdefault(name.rsplit("_seed", 1)[0], []).append(r["test_tuned"]["f1"])
+            label = "macro-F1" if multiclass else "F1"
             for cfg, f1s in by_cfg.items():
-                print(f"{cfg}: mean test F1 {np.mean(f1s):.4f} +/- {np.std(f1s, ddof=1) if len(f1s) > 1 else 0:.4f} over {len(f1s)} seeds")
+                print(f"{cfg}: mean test {label} {np.mean(f1s):.4f} +/- {np.std(f1s, ddof=1) if len(f1s) > 1 else 0:.4f} over {len(f1s)} seeds")
 
     if args.mode == "test":
         if not args.run_dir:
@@ -775,11 +992,21 @@ def main(argv=None):
         run_dir = Path(args.run_dir)
         meta = json.loads((run_dir / "args.json").read_text())
         a = argparse.Namespace(**meta["args"])
+        # a run belongs to one dataset: evaluating it on another data_root silently mixes datasets
+        current_root = str(Path(args.data_root).resolve())
+        stored_root = meta.get("data_root")
+        if stored_root is None:
+            print(f"[WARN] {run_dir / 'args.json'} predates the data_root record; evaluating on {current_root} unchecked")
+        elif stored_root != current_root and not args.allow_other_data_root:
+            raise RuntimeError(f"--mode test on a different data_root than the run was trained on:\n"
+                               f"  trained on : {stored_root}\n  now        : {current_root}\n"
+                               f"pass --allow_other_data_root if this is intended")
         set_seed(meta["seed"], deterministic=not a.no_deterministic)
         model = build_model(a.model_type, device, num_relations=meta["num_relations"], node_feat_dim=meta["node_feat_dim"],
                             hidden_dim=a.hidden_dim, num_rgcn_layers=a.rgcn_layers, fusion_layers=a.fusion_layers,
                             tune_last_n_layers=a.tune_last_n_layers, max_length=a.max_length, ablation=a.ablation,
-                            gate_temperature=a.gate_temperature, seed=meta["seed"])
+                            gate_temperature=a.gate_temperature, seed=meta["seed"],
+                            num_classes=int(meta.get("num_classes", 2)))
         model.load_state_dict(torch.load(run_dir / "best.pth", map_location=device))
         input_dir = Path(args.data_root) / "input"
         val_loader, _ = make_loader(input_dir, "valid", batch_size=args.eval_batch_size, shuffle=False, seed=0)

@@ -3,13 +3,20 @@
 
     python scripts/compare_runs.py --a "runs/hybrid_bs16_lr1e-04_br0.30_seed*" \
                                    --b "runs/codebert_bs16_lr1e-04_br0.30_seed*" [--n_boot 2000] [--threshold tuned|0.5]
+                                   [--metric f1|macro_f1|accuracy]
 
 Each run directory must contain test_preds.npz (probs, labels, idx) and metrics.json
 (written by run.py). Samples are aligned across runs by ``idx``; every run is
 scored at its own validation-tuned threshold (or 0.5). The statistic is the
-difference of the seed-averaged F1 (group A minus group B); its 95% interval
+difference of the seed-averaged metric (group A minus group B); its 95% interval
 comes from resampling test samples with replacement (paired, i.e. the same
 resample is applied to every run).
+
+Metrics: ``f1`` (default) is the positive-class F1 of a binary run (1-D probs,
+thresholded). Multi-class runs store probs of shape [N, C]; their predictions
+are the argmax (no threshold) and the metric must be ``macro_f1`` (mean of the
+per-class F1 over all C classes) or ``accuracy``, both also usable on binary
+runs (thresholded predictions, C = 2).
 """
 import argparse
 import glob
@@ -17,6 +24,8 @@ import json
 from pathlib import Path
 
 import numpy as np
+
+METRICS = ("f1", "macro_f1", "accuracy")
 
 
 def load_group(pattern, threshold):
@@ -27,8 +36,12 @@ def load_group(pattern, threshold):
             continue
         z = np.load(d / "test_preds.npz")
         m = json.loads((d / "metrics.json").read_text())
-        t = m["test_tuned"]["threshold"] if threshold == "tuned" else float(threshold)
-        runs.append({"name": d.name, "probs": z["probs"], "labels": z["labels"], "idx": z["idx"], "thr": t})
+        probs = z["probs"]
+        if probs.ndim == 2:
+            t = None                                  # multi-class: argmax, no threshold
+        else:
+            t = m["test_tuned"]["threshold"] if threshold == "tuned" else float(threshold)
+        runs.append({"name": d.name, "probs": probs, "labels": z["labels"], "idx": z["idx"], "thr": t})
     if not runs:
         raise SystemExit(f"no runs match {pattern}")
     return runs
@@ -54,7 +67,19 @@ def align(groups):
     return common
 
 
+def num_classes_of(run):
+    return int(run["probs"].shape[1]) if run["probs"].ndim == 2 else 2
+
+
+def predictions(run):
+    """Integer class predictions: argmax for [N, C] probs, thresholded for 1-D probs."""
+    if run["probs"].ndim == 2:
+        return run["probs"].argmax(axis=1)
+    return (run["probs"] >= run["thr"]).astype(int)
+
+
 def group_f1(group, sample_idx=None):
+    """Positive-class F1 (binary runs), seed-averaged. Unchanged from the original script."""
     vals = []
     for r in group:
         p = r["probs"] >= r["thr"]
@@ -66,28 +91,71 @@ def group_f1(group, sample_idx=None):
     return float(np.mean(vals)), vals
 
 
-def main():
+def macro_f1(pred, y, C):
+    """Mean over all C classes of the per-class F1 (a class absent from both
+    pred and y contributes 0, as run.py's metrics_multiclass does)."""
+    tp = np.bincount(y[pred == y], minlength=C)[:C]
+    pred_n = np.bincount(pred, minlength=C)[:C]
+    true_n = np.bincount(y, minlength=C)[:C]
+    f1s = [f1_from_counts(int(tp[c]), int(pred_n[c] - tp[c]), int(true_n[c] - tp[c])) for c in range(C)]
+    return float(np.mean(f1s))
+
+
+def group_metric(group, metric, sample_idx=None):
+    """Seed-averaged ``metric`` of a group, optionally on the resampled items ``sample_idx``."""
+    if metric not in METRICS:
+        raise ValueError(f"unknown metric {metric}; choose from {METRICS}")
+    if metric == "f1":
+        for r in group:
+            if r["probs"].ndim == 2:
+                raise SystemExit(f"--metric f1 is the positive-class F1 of a binary task, but {r['name']} holds "
+                                 f"[N, {num_classes_of(r)}] multi-class probabilities; use --metric macro_f1 or accuracy")
+        return group_f1(group, sample_idx)
+    vals = []
+    for r in group:
+        pred = predictions(r)
+        y = r["labels"].astype(int)
+        if sample_idx is not None:
+            pred, y = pred[sample_idx], y[sample_idx]
+        if metric == "accuracy":
+            vals.append(float((pred == y).mean()) if len(y) else 0.0)
+        else:
+            vals.append(macro_f1(pred, y, num_classes_of(r)))
+    return float(np.mean(vals)), vals
+
+
+def main(argv=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--a", required=True, help="glob of run dirs (group A, e.g. hybrid seeds)")
     ap.add_argument("--b", required=True, help="glob of run dirs (group B, e.g. baseline seeds)")
     ap.add_argument("--threshold", default="tuned")
+    ap.add_argument("--metric", choices=METRICS, default="f1",
+                    help="f1 = positive-class F1 (binary only); macro_f1 / accuracy work for binary and multi-class runs")
     ap.add_argument("--n_boot", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=0)
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     A, B = load_group(args.a, args.threshold), load_group(args.b, args.threshold)
     common = align([A, B])
     n = len(common)
-    fa, fa_each = group_f1(A)
-    fb, fb_each = group_f1(B)
-    print(f"test samples aligned by idx: {n} (positives {int(A[0]['labels'].sum())})")
-    print(f"A ({len(A)} runs): mean F1 {fa:.4f} +/- {np.std(fa_each, ddof=1) if len(fa_each) > 1 else 0:.4f}  {[round(v, 4) for v in fa_each]}")
-    print(f"B ({len(B)} runs): mean F1 {fb:.4f} +/- {np.std(fb_each, ddof=1) if len(fb_each) > 1 else 0:.4f}  {[round(v, 4) for v in fb_each]}")
+    classes = {num_classes_of(r) for r in A + B}
+    if len(classes) > 1:
+        raise SystemExit(f"runs disagree on the number of classes: {sorted(classes)}")
+    C = classes.pop()
+    fa, fa_each = group_metric(A, args.metric)
+    fb, fb_each = group_metric(B, args.metric)
+    label = {"f1": "F1", "macro_f1": "macro-F1", "accuracy": "accuracy"}[args.metric]
+    if C == 2:
+        print(f"test samples aligned by idx: {n} (positives {int(A[0]['labels'].sum())})")
+    else:
+        print(f"test samples aligned by idx: {n} ({C} classes, argmax predictions)")
+    print(f"A ({len(A)} runs): mean {label} {fa:.4f} +/- {np.std(fa_each, ddof=1) if len(fa_each) > 1 else 0:.4f}  {[round(v, 4) for v in fa_each]}")
+    print(f"B ({len(B)} runs): mean {label} {fb:.4f} +/- {np.std(fb_each, ddof=1) if len(fb_each) > 1 else 0:.4f}  {[round(v, 4) for v in fb_each]}")
     rng = np.random.default_rng(args.seed)
     diffs = np.empty(args.n_boot)
     for i in range(args.n_boot):
         s = rng.integers(0, n, n)
-        diffs[i] = group_f1(A, s)[0] - group_f1(B, s)[0]
+        diffs[i] = group_metric(A, args.metric, s)[0] - group_metric(B, args.metric, s)[0]
     lo, hi = np.percentile(diffs, [2.5, 97.5])
     print(f"A - B: {fa - fb:+.4f}  95% paired-bootstrap CI [{lo:+.4f}, {hi:+.4f}]  P(A>B)={float((diffs > 0).mean()):.3f}")
     if lo <= 0 <= hi:
