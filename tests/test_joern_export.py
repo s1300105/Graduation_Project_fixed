@@ -101,15 +101,16 @@ def test_unknown_graph_unit_raises():
 def test_whole_file_unit_on_single_function_export_keeps_one_global_per_numbered_file():
     stats = {}
     kept = cp.json_process(str(EXPORT.parent), EXPORT.name, stats, graph_unit="whole_file")
-    assert [i for i, _ in kept] == [101, 1035, 10019, 10048, 10052, 10115, 10125, 10131, 10141, 10204, 10280, 10289]
+    # 101.cpp and 10131.c: Joern parsed nothing, so their <global> is only the file spine and the
+    # rows are NOT returned (the caller counts them as lost / sends them through the rescue pass)
+    assert [i for i, _ in kept] == [1035, 10019, 10048, 10052, 10115, 10125, 10141, 10204, 10280, 10289]
     assert all(cp.is_global_method(e["functions"][0]) for _, e in kept)
-    assert stats["whole_files_kept"] == 12 and stats["functions_kept"] == 12
+    assert stats["whole_files_kept"] == 10 and stats["functions_kept"] == 10
     assert stats["methods_folded_into_whole_file"] == 10           # the 10 real methods of first_method
-    assert stats["whole_files_without_real_method"] == 2           # 101.cpp and 10131.c: Joern parsed nothing
+    assert stats["whole_files_without_real_method"] == 2           # 101.cpp and 10131.c dropped
     assert stats["skipped_unnumbered"] == 82                       # 81 call-target stubs + <includes>:<global>
     counts = {i: cp.whole_file_real_method_count(e["functions"][0]) for i, e in kept}
-    assert [i for i, c in counts.items() if c == 0] == [101, 10131]
-    assert all(c == 1 for i, c in counts.items() if i not in (101, 10131))
+    assert all(c == 1 for c in counts.values())
 
 
 # ---------------------------------------------------------------------------------------

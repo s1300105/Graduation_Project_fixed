@@ -166,9 +166,11 @@ def json_process(in_path, json_file, stats: dict | None = None, graph_unit: str 
     graph_unit="whole_file": exactly the ``<file>:<global>`` graph of each
     numbered file is kept and the file's other methods are ignored (counted in
     ``stats["methods_folded_into_whole_file"]``); ``stats["whole_files_kept"]``
-    counts the rows and ``stats["whole_files_without_real_method"]`` the files
-    whose ``<global>`` was kept although Joern found no real method in them
-    (a parse failure: the graph is then only the file spine).
+    counts the rows. A numbered file whose ``<global>`` contains NO real method
+    (Joern parsed nothing: the graph would be only the 3-node file spine) is NOT
+    returned, so that the caller treats the row as lost (rescue pass / loss
+    accounting) instead of training on a labelled empty graph; such files are
+    counted in ``stats["whole_files_without_real_method"]``.
     The return shape is the same for both units."""
     if graph_unit not in GRAPH_UNITS:
         raise ValueError(f"unknown graph_unit {graph_unit!r}; expected one of {GRAPH_UNITS}")
@@ -228,6 +230,12 @@ def _json_process_whole_file(methods: list, stats: dict | None):
         folded += 1                         # real method / #define macro method of a numbered file
         if not is_macro_method(g):
             files_with_real_method.add(r[0])
+    # a <global> without any real method is a parse failure, not a graph: drop it so the row
+    # goes through the rescue pass and is counted as lost (a kept 3-node spine would silently
+    # become a labelled training example)
+    empty = sorted(i for i in kept if i not in files_with_real_method)
+    for i in empty:
+        del kept[i]
     if stats is not None:
         stats["methods_total"] = stats.get("methods_total", 0) + len(methods)
         stats["skipped_unnumbered"] = stats.get("skipped_unnumbered", 0) + skipped_other
@@ -235,6 +243,5 @@ def _json_process_whole_file(methods: list, stats: dict | None):
         stats["duplicate_global_same_idx"] = stats.get("duplicate_global_same_idx", 0) + dup_global
         stats["whole_files_kept"] = stats.get("whole_files_kept", 0) + len(kept)
         stats["functions_kept"] = stats.get("functions_kept", 0) + len(kept)
-        stats["whole_files_without_real_method"] = (stats.get("whole_files_without_real_method", 0)
-                                                    + sum(1 for i in kept if i not in files_with_real_method))
+        stats["whole_files_without_real_method"] = stats.get("whole_files_without_real_method", 0) + len(empty)
     return sorted(kept.items())

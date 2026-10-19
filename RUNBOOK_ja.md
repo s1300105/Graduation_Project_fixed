@@ -141,3 +141,69 @@ python scripts/compare_runs.py --a "runs/hybrid_bs16_lr1.0e-04_br0.30_seed*" --b
 - Joern が落ちる / 遅い: `logs/cpg_embed.log` の `[ERROR]` 行と manifest の `joern_failed_slices`。JVM のヒープは `JAVA_OPTS=-Xmx8g` などで調整。
 - GPU の scatter 演算は非決定的なので同一 seed でも完全一致はしない。だから 3 seed 以上で区間を出す。
 - 旧リポジトリのチェックポイントはモデル形状が違うので読めない（学習し直す）。
+
+## 11. 課題スイート（POJ-104 / CodeNet C++1000 / Devign）
+
+設計判断と根拠は `docs/TASK_SUITE_ja.md`。BigVul の `data/` と `runs/` は触らず、データセットごとに `--data_root` と `--runs_dir` と `--run_prefix` を分ける（`--cpg` は `<data_root>/cpg` を、`--embed` は `<data_root>/input` を**消して作り直す**）。
+
+### 11.1 取得と前処理
+
+```bash
+mkdir -p data/raw
+# POJ-104: HF の parquet 3 本（13 MB）。53,000 行 → 分割またぎの重複 1,000 行とラベル衝突 20 行を除いて 51,980 行、104 クラス、層化 80/10/10
+python data/scripts/make_poj104_json.py --input data/raw/poj104 --hf --out_dir data_poj/cleaned_data
+# Devign (CodeXGLUE defect detection): parquet 3 本（22 MB）。公式分割を保ち、ラベル衝突 162 行・分割またぎ 2 行・重複 1 行・空 2 行を除いて 21,710 / 2,723 / 2,718
+python data/scripts/make_devign_json.py --input data/raw/codexglue_defect --hf --out_dir data_devign/cleaned_data
+# CodeNet C++1000: tarball 136 MB（1000 問題 × 500 本）。既定は 1 問題 100 本 = 10 万本。メタデータ（294 MB）があれば Accepted のみに絞り、--split user で利用者横断分割
+curl -L -o data/raw/Project_CodeNet_C++1000.tar.gz https://codait-cos-dax.s3.us.cloud-object-storage.appdomain.cloud/dax-project-codenet/1.0.0/Project_CodeNet_C++1000.tar.gz
+tar -xzf data/raw/Project_CodeNet_C++1000.tar.gz -C data/raw/
+python data/scripts/make_codenet_json.py --input data/raw/Project_CodeNet_C++1000 --out_dir data_codenet/cleaned_data --per_problem 100
+# 小さく試すなら --problems 50 --per_problem 100
+```
+
+各スクリプトは `<dataset>_classes.json`（target → 問題 ID）と `<dataset>_prep_stats.json`（各段階の件数、重複、拡張子の内訳、K&R の件数）を書く。**学習より先にこれらをコミットする**（分割の凍結）。
+
+### 11.2 CPG と埋め込み
+
+```bash
+# プログラム全体: Joern のファイル単位 <global> を 1 グラフにする（main と補助関数、グローバル変数とその初期化子を含む。#define の関数風マクロと呼び先スタブは含まない）
+nohup python -u run.py --cpg --embed --dataset poj104  --data_root data_poj     --graph_unit whole_file --max_nodes 1000 > logs/poj_cpg_embed.log 2>&1
+nohup python -u run.py --cpg --embed --dataset codenet --data_root data_codenet --graph_unit whole_file --max_nodes 1000 > logs/codenet_cpg_embed.log 2>&1
+# 単一関数: 既定（first_method）。救済段階 C（小文字マクロ）が自動で効く
+nohup python -u run.py --cpg --embed --dataset devign  --data_root data_devign > logs/devign_cpg_embed.log 2>&1
+```
+
+- `--max_nodes` の切り捨ては**ソース位置順**なので、プログラム全体では後方の関数（しばしば main）から消える。`input/manifest.json` の `graphs_at_cap` を見て、無視できない割合なら上げる（CodeNet の 200 本試走では 1000 ノードで 4 本 = 2%）。
+- `cpg_manifest.json` の `whole_files_without_real_method` は Joern が何も解析できなかったファイル（殻にはせず、救済パス → `rows_lost_in_joern`）。`rescued_stage_C` は小文字マクロで救えた件数。
+- `--node_code_mode full`（既定）では `<global>` の BLOCK ノードがファイル全文の CLS を持つ。テキスト枝との冗長性を抑えたい場合は `first_line` を別の `--data_root` で作って比較する。
+- 多クラスのクラス数は `--embed` が `target` から推定して `input/manifest.json` に書く（`--num_classes` で明示も可。食い違えば止まる）。
+
+### 11.3 学習と判定
+
+```bash
+COMMON="--epochs 40 --patience 10 --seeds 0 1 2 3 4"
+for ds in poj codenet; do
+  for arm in "graph_only" "hybrid --ablation shuffle_edges" "codebert" "hybrid" "hybrid --ablation no_gate"; do
+    name=$(echo $arm | tr ' ' '_' | tr -d '-')
+    nohup python -u run.py --mode train --model_type $arm --data_root data_$ds --runs_dir runs_$ds --run_prefix ${ds}_ $COMMON > logs/${ds}_${name}.log 2>&1
+  done
+done
+# 判定は macro-F1（均衡なので accuracy と同順）。対応つき bootstrap は同じ idx のテスト項目で揃える
+python scripts/compare_runs.py --metric macro_f1 --a "runs_poj/poj_hybrid_bs16*" --b "runs_poj/poj_codebert_bs16*"
+python scripts/compare_runs.py --metric macro_f1 --a "runs_poj/poj_hybrid_bs16*" --b "runs_poj/poj_hybrid-shuffle_edges_bs16*"
+```
+
+- 主比較は **5 seed 以上**（1〜2 点の差は 3 seed では見えない。`docs/TASK_SUITE_ja.md` §4）。
+- 多クラスの `history.jsonl` には `val_accuracy` / `val_macro_f1` / `val_top5` が増え、`val_threshold` は null。`mean_p1` / `frac_p1_mid` は最大クラス確率に対する値。
+- `--mode test` は run の `args.json` に記録した `data_root` と違うデータを拒否する（`--allow_other_data_root` で明示的に上書き）。
+- 1000 クラスの CodeNet では `--loss ce` も試す（focal の α は均衡データでは全て ≈ 1 なので差は γ の項だけ）。
+
+### 11.4 時間の目安（RTX 3090、BigVul 18 万関数の実績から外挿）
+
+| 段階 | POJ-104（52k 本） | CodeNet（100k 本） | Devign（27k 関数） |
+|---|---|---|---|
+| Joern（`--cpg`） | 1 スライス 500 本あたり数十秒 → 1〜2 時間 | 2〜4 時間 | 1 時間弱 |
+| ノード埋め込み（`--embed`） | ノード数は BigVul より多い（プログラム全体）ので BigVul と同程度〜倍 | BigVul の 1.5〜2 倍 | BigVul の 1/5 |
+| 学習 1 epoch（hybrid） | BigVul の 1/3 程度 | BigVul の 2/3 程度 | BigVul の 1/6 程度 |
+
+いずれも処理系の実測を取ってから本番の seed 数を決める（§6 の手順と同じ）。

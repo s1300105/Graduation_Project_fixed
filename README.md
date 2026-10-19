@@ -33,6 +33,10 @@ Vulnerability Detection」（R-GCN + CodeBERT, BigVul）の実装
 | M26 | Joern 失敗時に `zip` がずれて空結合 | 出力を stem で対応づけ、失敗は manifest に計数 | `run.py`, `cpg_generator.py` |
 | M29 | 関数単位ランダム分割のみ | `make_bigvul_json.py --split project` でプロジェクト横断分割 | `data/scripts/make_bigvul_json.py` |
 | — | 単一 run 同士の比較に検定がない | `scripts/compare_runs.py`: 同一テスト集合上の対応つき bootstrap で ΔF1 の 95% 区間 | `scripts/` |
+| — | 二値・単一関数（BigVul）しか扱えない | **課題スイート**（`docs/TASK_SUITE_ja.md`）: 多クラス分類（`--num_classes`、argmax の accuracy / macro-F1 / top-5、`--select_on macro_f1\|accuracy`、`compare_runs.py --metric`）、プログラム全体のグラフ（`--graph_unit whole_file` = Joern のファイル単位 `<global>`）、POJ-104 / CodeNet C++1000 / Devign の前処理スクリプト。二値の経路は `tests/test_golden_binary.py` でビット同一を保証 | `run.py`, `utils/process/cpg_generator.py`, `utils/data/prep.py`, `data/scripts/make_{poj104,codenet,devign}_json.py` |
+| — | 「最初の非 `<global>` メソッドを採る」規則が、複数関数のプログラムで main を捨てる（POJ-104 で 15%、CodeNet で 44%。実測） | `--graph_unit whole_file`。Joern が何も解析できなかったファイルは殻のグラフにせず損失として数える | `cpg_generator.py` |
+| — | 小文字のシグネチャマクロ（`av_cold`, `coroutine_fn`, `APR_INLINE`, `APR_DECLARE(type)`）で Joern に落ちる（Devign 4.5%、D2A 5.5%。実測） | 救済段階 C（既知マクロの一覧と戻り値型マクロの展開。`manifest` の `rescued_stage_C`） | `utils/data/datamanager.py` |
+| — | K&R 形式の `main()` を `.cpp` で渡すと main が丸ごと消える（Joern 4.0.400 で実測） | 前処理スクリプトが `ext` 列を書き、`to_files` がそれを優先する。規則: K&R main → `.c`、それ以外で C++ の手がかり → `.cpp` | `prep.py`, `datamanager.py` |
 
 論文の記述から**意図的に変えた**点（全て引数で元に戻せます）: 入力 LayerNorm、ノードラベル埋め込み、R-GCN の残差、`cls_skip`、勾配クリッピング 1.0、重み減衰を LayerNorm / bias に掛けない、1200 字フィルタなし。
 HEAD にだけあった pre-GCN attention と 768 次元化は論文にないので入れていません。
@@ -77,6 +81,30 @@ python scripts/compare_runs.py --a "runs/hybrid_bs16_lr1.0e-04_br0.30_seed*" --b
 # 6. 既存 run の再評価
 python run.py --mode test --run_dir runs/hybrid_bs16_lr1.0e-04_br0.30_seed0
 ```
+
+### 課題スイート（非セキュリティの多クラス課題。詳細は `docs/TASK_SUITE_ja.md` と RUNBOOK §11）
+
+```bash
+# POJ-104（104 クラス、プログラム全体）: HF の parquet を取得 → jsonl（分割またぎの重複除去、dedup、層化 80/10/10）
+python data/scripts/make_poj104_json.py --input data/raw/poj104 --hf --out_dir data_poj/cleaned_data
+# CodeNet C++1000（既定 100 本/問題 = 10 万本）。メタデータを渡すと Accepted のみ・利用者横断分割が可能
+python data/scripts/make_codenet_json.py --input data/raw/Project_CodeNet_C++1000 --out_dir data_codenet/cleaned_data [--metadata_dir data/raw/Project_CodeNet/metadata --split user]
+# Devign（CodeXGLUE defect detection、二値・均衡）: 公式分割を保ち、ラベル衝突・分割またぎの重複を除く
+python data/scripts/make_devign_json.py --input data/raw/codexglue_defect --hf --out_dir data_devign/cleaned_data
+
+# プログラム全体は <global> を 1 グラフにする。ノード上限は位置順の切り捨てなので上げる
+python run.py --cpg --embed --dataset poj104  --data_root data_poj     --graph_unit whole_file --max_nodes 1000
+python run.py --cpg --embed --dataset codenet --data_root data_codenet --graph_unit whole_file --max_nodes 1000
+python run.py --cpg --embed --dataset devign  --data_root data_devign                       # 単一関数は既定どおり
+
+# 多クラスはクラス数を input/manifest.json から読む。run 名にデータセットの接頭辞を付けて BigVul の run と分ける
+python run.py --mode train --model_type codebert --data_root data_poj --runs_dir runs_poj --run_prefix poj_ --seeds 0 1 2 3 4
+python run.py --mode train --model_type hybrid   --data_root data_poj --runs_dir runs_poj --run_prefix poj_ --seeds 0 1 2 3 4
+python run.py --mode train --model_type hybrid --ablation shuffle_edges --data_root data_poj --runs_dir runs_poj --run_prefix poj_ --seeds 0 1 2 3 4
+python scripts/compare_runs.py --metric macro_f1 --a "runs_poj/poj_hybrid_bs16*" --b "runs_poj/poj_codebert_bs16*"
+```
+
+多クラスでは閾値調整は無く argmax。`metrics.json` の `test_tuned` / `test_05` は同じ argmax 指標（`threshold: null`、`accuracy`、`macro_f1`、`top5_accuracy`、`per_class_f1`）。選択基準は `--select_on tuned`（= macro-F1）か `accuracy`。
 
 グリッドサーチは `--batch_sizes 8 16 32 --lrs 1e-4 5e-5 3e-5 1e-5 --bert_lr_ratios 0.1 0.2 0.3` のように
 リストを渡します（最終モデル・最終損失・全データで行うこと。元のスイープは別モデル・10% データで行われていました）。

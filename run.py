@@ -658,9 +658,7 @@ def cpg_generate(args):
         shutil.rmtree(cpg_dir)
     cpg_dir.mkdir(parents=True)
     manifest = {"args": vars(args), "splits": {}}
-    # whole_file keeps Joern's per-file <global> method (the whole program); passing nothing keeps the
-    # first_method call exactly as before
-    gu = {} if args.graph_unit == "first_method" else {"graph_unit": args.graph_unit}
+    # --graph_unit whole_file keeps Joern's per-file <global> method (the whole program) per source file
     for split, path in (("train", args.train_jsonl), ("valid", args.valid_jsonl), ("test", args.test_jsonl)):
         df = read_jsonl(path)
         n_in = len(df)
@@ -697,7 +695,7 @@ def cpg_generate(args):
             if not json_file:
                 stats["joern_failed_slices"] += 1
                 continue
-            graphs = cpgproc.json_process(str(cpg_dir), json_file, stats, **gu) or []
+            graphs = cpgproc.json_process(str(cpg_dir), json_file, stats, graph_unit=args.graph_unit) or []
             right = pd.DataFrame(graphs, columns=["Index", "cpg"]).set_index("Index")
             left = slice_df.set_index("Index", drop=False)
             joined = left.join(right, how="inner")
@@ -708,7 +706,7 @@ def cpg_generate(args):
             # --- rescue pass: functions Joern could not parse as written (macro signatures etc.) ---
             if not args.no_rescue_macros:
                 lost = left.loc[~left.index.isin(joined.index)]
-                for stage in getattr(dm, "RESCUE_STAGES", ("A", "B")):
+                for stage in dm.RESCUE_STAGES:
                     if lost.empty:
                         break
                     variants = {ix: dict(dm.rescue_variants(code)).get(stage) for ix, code in lost["func"].items()}
@@ -730,7 +728,7 @@ def cpg_generate(args):
                         continue
                     rjson = rres.get(rstem + ".bin")
                     if rjson:
-                        rgraphs = cpgproc.json_process(str(cpg_dir), rjson, {}, **gu) or []
+                        rgraphs = cpgproc.json_process(str(cpg_dir), rjson, {}, graph_unit=args.graph_unit) or []
                         rright = pd.DataFrame(rgraphs, columns=["Index", "cpg"]).set_index("Index")
                         rjoined = lost.loc[lost.index.isin(rright.index)].join(rright, how="inner")  # keeps the ORIGINAL func text
                         if len(rjoined):
