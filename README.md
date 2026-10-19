@@ -43,7 +43,7 @@ HEAD にだけあった pre-GCN attention と 768 次元化は論文にないの
 
 ## 検証済み / 未検証
 
-- `pytest`（167 件、CPU）: 実パイプライン形式のサンプル `data/check_data/cpg_head_check.json` に対する辺種別の一致（Joern が出した 67 AST / 59 CFG / 37 PDG と完全一致）、`<global>` の除外、3 モデル種 × アブレーションの forward / backward、損失の式、ストリームの順序、2 seed × 3 設定の端から端までの学習・評価・再評価、分割スクリプト、Joern v4.0.400 の実出力（`tests/fixtures/joern_v4_export.json`）の読み込み。
+- `pytest`（CPU）: 実パイプライン形式のサンプル `data/check_data/cpg_head_check.json` に対する辺種別の一致（Joern が出した 67 AST / 59 CFG / 37 PDG と完全一致）、`<global>` の除外、3 モデル種 × アブレーションの forward / backward、損失の式、ストリームの順序、2 seed × 3 設定の端から端までの学習・評価・再評価、分割スクリプト、Joern v4.0.400 の実出力（`tests/fixtures/joern_v4_export.json`）の読み込み。。課題スイートで追加: 二値の学習出力のビット同一（`tests/test_golden_binary.py`）、3 クラスの端から端まで（manifest からのクラス数、`--num_classes`、`--select_on`）、Joern 4.0.400 のプログラム全体の実出力（`joern_v4_export_multi.json`、`joern_v4_export_crafted.json`: ラムダの合流、関数の無いファイルの除外、同じ番号の .c/.cpp）、救済段階 C、`ext` 列、前処理スクリプト 3 本の契約（合成入力）、`compare_runs` の多クラスと取り違え検出、Joern を模した `--cpg` の集計（`--rescue_stages`、whole_file の損失）、`--embed --resume` の来歴確認、`--mode test` の別データ評価
 - Joern v4.0.400 を使って `tests/fixtures/joern_inputs/` の 12 関数で `run.py --cpg --embed --node_embedding fast` → `--mode train`（hybrid / graph_only、2 seed）→ `scripts/compare_runs.py` まで通した。12 ファイル中 7 件が `.cpp`（うち 101 は初期化子リストだけのコンストラクタ断片）、5 件が `.c` として書き出され、`CClient::ClearServerDependentCaps` が 80 ノード・AST 79 / CFG 64 / PDG 198 本の本物のグラフになる（元のコードでは 2 ノードの殻）。
 - **Joern で解析できない関数の扱い。** シグネチャのマクロ（`__init`、`__user`、`UNUSED`、`__attribute__((...))` など）で Joern が関数を認識できない場合、`--cpg` はシグネチャからマクロを除いた版で自動的に再投入する（救済パス。段階 A は控えめ、段階 B は積極的。本文は変えず、テキスト枝は元のコードを読む。`--no_rescue_macros` で無効化）。それでも落ちる関数（例: クラス文脈のないコンストラクタ断片）は除外される。件数は `data/cpg/cpg_manifest.json` の `rescued_stage_A` / `rescued_stage_B` / `rescued_stage_C` / `rows_lost_in_joern` に出るので論文に書くこと（キーは 0 件でも常に書く）。両腕とも同じ入力ファイルを読むので比較は対称。**段階 C（小文字のシグネチャマクロ `av_cold` / `coroutine_fn` / `APR_INLINE`、戻り値型マクロ `APR_DECLARE(type)`）は後から追加した**ので、それ以前に作った BigVul の CPG を作り直すと行集合が増える（FFmpeg 由来の関数）。以前の挙動で作り直すなら `--rescue_stages AB`。プログラム全体（`--graph_unit whole_file`）では救済パスは走らない（先頭の `#define` / `#include` 行を関数シグネチャとして書き換えてしまうため。件数は `rescue_skipped_whole_file`）。
 - **BigVul の `lang` 列は信頼しない。** 公開ミラーでは `CPP` と記録された行が 1.4% しかないのに、C++ 構文を含む関数は 10% 以上ある。`lang` は「C++ である」方向のヒントにだけ使い、`C` と書かれていても構文判定で C++ なら `.cpp` として Joern に渡す。
@@ -103,6 +103,8 @@ python run.py --mode train --model_type hybrid   --data_root data_poj --runs_dir
 python run.py --mode train --model_type hybrid --ablation shuffle_edges --data_root data_poj --runs_dir runs_poj --run_prefix poj_ --seeds 0 1 2 3 4
 python scripts/compare_runs.py --metric macro_f1 --a "runs_poj/poj_hybrid_bs16*" --b "runs_poj/poj_codebert_bs16*"
 ```
+
+`--mode test --allow_other_data_root` の結果は `<run>/reeval_<名前>/` に書き、run 自身の出力は上書きしない。`compare_runs.py` は同じテスト集合でない組（idx は同じでもラベルが違う）を拒否する。
 
 多クラスでは閾値調整は無く argmax。`metrics.json` の `test_tuned` / `test_05` は同じ argmax 指標（`threshold: null`、`accuracy`、`macro_f1`、`top5_accuracy`、`per_class_f1`）。選択基準は `--select_on tuned`（= macro-F1）か `accuracy`。
 

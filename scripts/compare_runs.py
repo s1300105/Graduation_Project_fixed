@@ -53,17 +53,41 @@ def f1_from_counts(tp, fp, fn):
 
 
 def align(groups):
+    """Restrict every run to the test items (idx) all runs share, in one order.
+
+    Refuses inputs on which a paired comparison is meaningless: duplicate or
+    missing (-1) idx within a run, no common idx, or runs that disagree on the
+    label of a shared idx (idx are renumbered from 0 by every preparation
+    script, so runs of two different datasets overlap in idx but not in labels)."""
     common = None
     for g in groups:
         for r in g:
-            s = set(r["idx"].tolist())
+            idx = r["idx"].tolist()
+            if len(set(idx)) != len(idx) or any(v < 0 for v in idx):
+                raise SystemExit(f"{r['name']}: test_preds.npz has duplicate or missing (-1) idx; "
+                                 f"regenerate the inputs with an idx column before comparing")
+            s = set(idx)
             common = s if common is None else common & s
-    common = np.array(sorted(common))
+    if not common:
+        raise SystemExit("the groups share no test idx (different datasets / data_root?)")
+    common = np.array(sorted(common), dtype=np.int64)
+    sizes = {}
     for g in groups:
         for r in g:
+            sizes[r["name"]] = len(r["idx"])
             pos = {v: i for i, v in enumerate(r["idx"].tolist())}
-            sel = np.array([pos[v] for v in common])
+            sel = np.array([pos[v] for v in common], dtype=np.int64)
             r["probs"], r["labels"], r["idx"] = r["probs"][sel], r["labels"][sel], r["idx"][sel]
+    ref = groups[0][0]
+    for g in groups:
+        for r in g:
+            if not np.array_equal(r["labels"], ref["labels"]):
+                bad = int((r["labels"] != ref["labels"]).sum())
+                raise SystemExit(f"{r['name']} and {ref['name']} disagree on the label of {bad} of {len(common)} shared "
+                                 f"test idx: they were not evaluated on the same test set")
+    partial = {k: v for k, v in sizes.items() if v != len(common)}
+    if partial:
+        print(f"[WARN] only {len(common)} test idx are shared; full test sizes: {partial}")
     return common
 
 

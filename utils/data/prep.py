@@ -518,6 +518,10 @@ def find_hf_parquets(input_dir) -> dict:
         cands = sorted(input_dir.glob(f"{split}*.parquet")) + sorted(input_dir.glob(f"data/{split}*.parquet"))
         if not cands:
             raise SystemExit(f"[prep] FATAL: no {split}*.parquet under {input_dir} (use --hf to download)")
+        if len(cands) > 1:
+            # a sharded split or a second download next to the first: reading one file would drop rows silently
+            raise SystemExit(f"[prep] FATAL: several parquet files match {split}*: {[str(c) for c in cands]}; "
+                             f"keep exactly one file per split under {input_dir}")
         found[split] = str(cands[0])
     return found
 

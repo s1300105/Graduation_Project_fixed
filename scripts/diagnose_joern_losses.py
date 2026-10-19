@@ -126,8 +126,9 @@ def rerun_joern(lost: pd.DataFrame, joern_cli_dir: str, out_dir: Path, graph_uni
             verdict[stem] = ("pipeline_bug", names, labels)
         else:
             pending[stem] = labels
-    # rescue passes on what is still lost
-    for stage in dm.RESCUE_STAGES:
+    # rescue passes on what is still lost (run.py skips them for whole programs: the stages rewrite the
+    # #include / #define prologue as if it were a function signature)
+    for stage in (dm.RESCUE_STAGES if graph_unit == "first_method" else ()):
         if not pending:
             break
         rows = lost.loc[[int(s) for s in pending]].copy()

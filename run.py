@@ -266,7 +266,9 @@ def predict(model, loader, device):
         if n_classes == 2:
             probs.extend(F.softmax(logits, dim=-1)[:, 1].cpu().tolist())      # 1-D P(y=1)
         else:
-            probs.extend(F.softmax(logits, dim=-1).cpu().tolist())            # rows -> [N, C]
+            # [B, C] blocks: a list of Python floats would cost ~32 bytes per probability
+            # (hundreds of MB per epoch for 1000 classes)
+            probs.append(F.softmax(logits, dim=-1).double().cpu().numpy())
         labels.extend(y.cpu().tolist())
         bidx = getattr(batch, "idx", None)
         if bidx is None:
@@ -274,7 +276,7 @@ def predict(model, loader, device):
         else:
             idxs.extend([int(v) for v in (bidx.tolist() if torch.is_tensor(bidx) else bidx)])
     if n_classes is not None and n_classes != 2:
-        probs = np.asarray(probs, dtype=np.float64).reshape(-1, n_classes)
+        probs = np.concatenate(probs, axis=0) if probs else np.zeros((0, n_classes))
     else:
         probs = np.asarray(probs)
     return probs, np.asarray(labels), np.asarray(idxs), loss_sum / max(1, n)
@@ -603,7 +605,12 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
     plot_curves(run_dir)
     model.load_state_dict(torch.load(run_dir / "best.pth", map_location=device))
     result = evaluate_run(model, run_dir, val_loader, test_loader, device)
-    result.update({"best_epoch": best_epoch, "best_val_selection_f1": best_f1, "select_on": args.select_on})
+    # best_val_selection_f1 keeps its (frozen) name; it holds the value of the metric named here
+    sel_metric = ("accuracy" if args.select_on == "accuracy" else
+                  "macro_f1" if multiclass or args.select_on == "macro_f1" else
+                  "f1_tuned_threshold" if args.select_on == "tuned" else "f1_at_0.5")
+    result.update({"best_epoch": best_epoch, "best_val_selection_f1": best_f1, "select_on": args.select_on,
+                   "best_val_selection_metric": sel_metric})
     (run_dir / "metrics.json").write_text(json.dumps(result, indent=1))
     tt = result["test_tuned"]
     if multiclass:
@@ -651,6 +658,17 @@ def normalise_for_graph(code: str) -> str:
     return "\n".join(clean_gadget(code.splitlines()))
 
 
+def parse_rescue_stages(value: str) -> tuple:
+    """'ABC' / 'ab' / 'A,B' -> ('A', 'B', 'C') in pipeline order; unknown letters raise (a typo must
+    not silently disable the rescue pass). An empty value is refused: use --no_rescue_macros."""
+    letters = [c for c in str(value).upper() if c not in ", "]
+    unknown = sorted(set(letters) - set(dm.RESCUE_STAGES))
+    if unknown or not letters:
+        raise ValueError(f"--rescue_stages {value!r}: expected letters from {''.join(dm.RESCUE_STAGES)} "
+                         f"(e.g. ABC or AB); to disable the rescue pass use --no_rescue_macros")
+    return tuple(st for st in dm.RESCUE_STAGES if st in letters)
+
+
 def _validate_ext_column(df: pd.DataFrame, path) -> None:
     """A prepared jsonl may carry an ``ext`` column ('.c' / '.cpp' / null). Check it
     before any Joern work (and before the old CPG directory is removed) so a mangled
@@ -667,7 +685,15 @@ def _validate_ext_column(df: pd.DataFrame, path) -> None:
 def cpg_generate(args):
     data_root = Path(args.data_root)
     cpg_dir, joern_dir = data_root / "cpg", data_root / "joern_tmp"
-    rescue_stages = tuple(st for st in dm.RESCUE_STAGES if st in args.rescue_stages)
+    rescue_stages = parse_rescue_stages(args.rescue_stages)
+    if args.normalize_graph_identifiers and args.graph_unit == "whole_file":
+        raise ValueError("--normalize_graph_identifiers rewrites single functions; on whole programs it would turn "
+                         "#include / #define lines and string literals into VAR_i / FUN_i tokens. Not supported "
+                         "with --graph_unit whole_file")
+    if not args.no_rescue_macros and args.graph_unit == "first_method":
+        print(f"[INFO] rescue stages {''.join(rescue_stages) or '(none)'}"
+              + (" (stage C was added after the first BigVul CPG sets; --rescue_stages AB reproduces them)"
+                 if "C" in rescue_stages else ""))
     # read and validate every split before touching the previous output
     frames = []
     for split, path in (("train", args.train_jsonl), ("valid", args.valid_jsonl), ("test", args.test_jsonl)):
@@ -689,7 +715,10 @@ def cpg_generate(args):
         df = dm.clean(df)
         if "idx" not in df.columns:
             df["idx"] = df.index
-        stats = {"rows_in": n_in, "rows_after_filter": len(df), "positives_after_filter": int(df.target.sum()),
+        binary = set(int(v) for v in df.target.unique()) <= {0, 1}
+        stats = {"rows_in": n_in, "rows_after_filter": len(df),
+                 # a count of positives only means something for 0/1 labels (None for multi-class splits)
+                 "positives_after_filter": int(df.target.sum()) if binary else None,
                  "label_counts": {str(k): int(v) for k, v in df.target.value_counts().sort_index().items()},
                  "slices": 0, "joern_failed_slices": 0, "graphs_written": 0}
         if not args.no_rescue_macros:
@@ -777,7 +806,10 @@ def cpg_generate(args):
             dm.write(joined, str(cpg_dir), f"{stem}.pkl")
             stats["graphs_written"] += len(joined)
         stats["rows_lost_in_joern"] = stats["rows_after_filter"] - stats["graphs_written"]
-        if stats["rows_lost_in_joern"]:
+        if stats["rows_lost_in_joern"] and args.graph_unit == "whole_file":
+            print(f"[WARN] {split}: {stats['rows_lost_in_joern']} of {stats['rows_after_filter']} programs contain no "
+                  f"function Joern could parse (declarations only / unsupported syntax) and are excluded from ALL models.")
+        elif stats["rows_lost_in_joern"]:
             print(f"[WARN] {split}: {stats['rows_lost_in_joern']} of {stats['rows_after_filter']} functions produced no "
                   f"parsable method in Joern (fragments / unsupported syntax) and are excluded from ALL models.")
         manifest["splits"][split] = stats
@@ -786,65 +818,134 @@ def cpg_generate(args):
     (cpg_dir / "cpg_manifest.json").write_text(json.dumps(manifest, indent=1, ensure_ascii=False))
 
 
+COUNT_KEYS = ("rows", "graphs", "rows_without_graph", "rows_with_extra_graphs", "graphs_at_cap")
+
+
+def _file_fingerprint(path: Path) -> dict:
+    st = Path(path).stat()
+    return {"size": int(st.st_size), "mtime_ns": int(st.st_mtime_ns)}
+
+
+def _sidecar(input_dir: Path, base: str) -> Path:
+    """Per-slice record written next to <base>_input.pkl: which cpg pickle (size, mtime) and which
+    settings it was built from, and its counts. --resume trusts a slice only through this record."""
+    return input_dir / f"{base}_input.meta.json"
+
+
+def _classes_json(args, cpg_manifest_args: dict):
+    """<dataset>_classes.json next to the train jsonl the CPGs were built from (written by the
+    data/scripts/make_*_json.py preparation scripts), or None."""
+    train = cpg_manifest_args.get("train_jsonl") or args.train_jsonl
+    dataset = cpg_manifest_args.get("dataset") or args.dataset
+    if not train:
+        return None
+    p = Path(train).parent / f"{dataset}_classes.json"
+    return p if p.exists() else None
+
+
+def _legacy_record(cpg_pkl: Path, input_pkl: Path, args) -> dict:
+    """Counts of a slice embedded before sidecars existed, recomputed without CodeBERT."""
+    cdf = pd.read_pickle(cpg_pkl)
+    idf = pd.read_pickle(input_pkl)
+    extra = sum(1 for c in cdf["cpg"] if len(parse_to_functions(c, max_nodes=args.max_nodes,
+                                                                 skip_global=(args.graph_unit == "first_method"))) > 1)
+    graphs = [g for g in idf["input"] if g is not None]
+    counts = {"rows": int(len(cdf)), "graphs": len(graphs), "rows_without_graph": int(len(cdf) - len(graphs)),
+              "rows_with_extra_graphs": int(extra),
+              "graphs_at_cap": sum(1 for g in graphs if int(g.num_nodes) >= int(args.max_nodes))}
+    return {"counts": counts, "node_sum": sum(int(g.num_nodes) for g in graphs),
+            "edge_sum": sum(int(g.edge_index.size(1)) for g in graphs)}
+
+
 def embed_generate(args):
     data_root = Path(args.data_root)
     cpg_dir, input_dir = data_root / "cpg", data_root / "input"
-    if not args.resume and input_dir.exists():
-        shutil.rmtree(input_dir)
-    input_dir.mkdir(parents=True, exist_ok=True)
-    done = {p.name.replace("_input.pkl", "") for p in input_dir.glob("*_input.pkl")}
     settings = {"reverse_edges": bool(args.reverse_edges), "max_nodes": int(args.max_nodes),
                 "node_embedding": args.node_embedding, "node_max_len": int(args.node_max_len),
                 "node_code_mode": args.node_code_mode, "graph_unit": args.graph_unit}
     manifest_path = input_dir / "manifest.json"
-    counts = {"rows": 0, "graphs": 0, "rows_without_graph": 0, "rows_with_extra_graphs": 0, "graphs_at_cap": 0}
-    node_sum = edge_sum = 0
-    counts_cover = "all"
+
+    # ---- every check that can refuse the run comes BEFORE the previous input set is touched ----
     cpg_files = sorted(cpg_dir.glob("*_cpg.pkl"))
     if not cpg_files:
         raise RuntimeError(f"no *_cpg.pkl under {cpg_dir}; run --cpg first")
     cpg_manifest = cpg_dir / "cpg_manifest.json"
-    if cpg_manifest.exists():
-        stored_unit = json.loads(cpg_manifest.read_text()).get("args", {}).get("graph_unit", "first_method")
-        if stored_unit != args.graph_unit:
-            # with the wrong unit parse_to_functions returns [] for every row (whole_file CPGs hold only
-            # <global>) or records a unit the graphs do not have; both are silent, so refuse
-            raise RuntimeError(f"--embed --graph_unit {args.graph_unit} but {cpg_manifest} was generated with "
-                               f"--graph_unit {stored_unit}; pass the same value to --cpg and --embed")
-    # label range over ALL cpg rows (also the ones --resume skips), before anything is written
-    t_min, t_max = None, None
+    cpg_args = json.loads(cpg_manifest.read_text()).get("args", {}) if cpg_manifest.exists() else {}
+    stored_unit = cpg_args.get("graph_unit", "first_method")
+    if cpg_manifest.exists() and stored_unit != args.graph_unit:
+        # with the wrong unit parse_to_functions returns [] for every row (whole_file CPGs hold only
+        # <global>) or records a unit the graphs do not have; both are silent, so refuse
+        raise RuntimeError(f"--embed --graph_unit {args.graph_unit} but {cpg_manifest} was generated with "
+                           f"--graph_unit {stored_unit}; pass the same value to --cpg and --embed")
+    # label range over ALL cpg rows (also the ones --resume skips)
+    t_min, t_max, seen = None, None, set()
     for pkl in cpg_files:
         t = pd.read_pickle(pkl)["target"].astype("int64")
         if len(t):
             t_min = int(t.min()) if t_min is None else min(t_min, int(t.min()))
             t_max = int(t.max()) if t_max is None else max(t_max, int(t.max()))
+            seen.update(int(v) for v in t.unique())
         del t
-    num_classes = int(args.num_classes) if args.num_classes else max(2, (t_max if t_max is not None else 1) + 1)
+    classes_json = _classes_json(args, cpg_args)
+    n_listed = len(json.loads(classes_json.read_text())) if classes_json else None
+    if args.num_classes:
+        num_classes = int(args.num_classes)
+    elif n_listed is not None:
+        num_classes = max(2, n_listed)            # the class map of the prepared dataset, not max(label)+1
+    else:
+        num_classes = max(2, (t_max if t_max is not None else 1) + 1)
     if t_min is not None and (t_min < 0 or t_max >= num_classes):
         raise RuntimeError(f"targets range {t_min}..{t_max} but num_classes is {num_classes} "
                            f"(labels must be 0..{num_classes - 1}; check --num_classes / the dataset's label column)")
-    if args.resume:
-        if manifest_path.exists():
-            prev = json.loads(manifest_path.read_text())
-            if prev.get("num_classes", 2) != num_classes:
-                raise RuntimeError(f"--resume with a different num_classes (stored {prev.get('num_classes', 2)}, now {num_classes})")
-            for k, v in settings.items():
-                stored = prev.get(k, "first_method" if k == "graph_unit" else None)    # old manifests: first_method
-                if stored != v:
-                    raise RuntimeError(f"--resume with a different setting ({k}: stored {prev.get(k)!r}, now {v!r}); "
-                                       f"delete {input_dir} or rerun without --resume")
-            counts.update({k: int(prev.get("counts", {}).get(k, 0)) for k in counts})
-            node_sum, edge_sum = int(prev.get("node_sum", 0)), int(prev.get("edge_sum", 0))
-            counts_cover = prev.get("counts_cover", "all")
-        elif done:
-            print("[WARN] --resume without a previous manifest: counts will cover this invocation only")
-            counts_cover = "this_invocation"
+    if n_listed is not None and n_listed != num_classes:
+        print(f"[WARN] --num_classes {num_classes} but {classes_json} lists {n_listed} classes")
+    if num_classes > 2 and len(seen) < num_classes:
+        print(f"[WARN] {num_classes - len(seen)} of {num_classes} classes have no row in the CPG set "
+              f"(lost at --cpg or absent from the prepared splits); they stay in the label space")
+    prev = None
+    if args.resume and manifest_path.exists():
+        prev = json.loads(manifest_path.read_text())
+        if prev.get("num_classes", 2) != num_classes:
+            raise RuntimeError(f"--resume with a different num_classes (stored {prev.get('num_classes', 2)}, now {num_classes})")
+        for k, v in settings.items():
+            stored = prev.get(k, "first_method" if k == "graph_unit" else None)    # old manifests: first_method
+            if stored != v:
+                raise RuntimeError(f"--resume with a different setting ({k}: stored {stored!r}, now {v!r}); "
+                                   f"delete {input_dir} or rerun without --resume")
+
+    if not args.resume and input_dir.exists():
+        shutil.rmtree(input_dir)
+    input_dir.mkdir(parents=True, exist_ok=True)
+    done = {p.name.replace("_input.pkl", "") for p in input_dir.glob("*_input.pkl")}
+    records = {}
     for pkl in cpg_files:
         base = pkl.name.replace("_cpg.pkl", "")
         if args.resume and base in done:
-            print(f"[RESUME] skip {base}")
-            continue
+            side = _sidecar(input_dir, base)
+            inp = input_dir / f"{base}_input.pkl"
+            if side.exists():
+                rec = json.loads(side.read_text())
+                if rec.get("settings") != settings or rec.get("num_classes") != num_classes:
+                    raise RuntimeError(f"--resume: {inp} was built with other settings ({side}); "
+                                       f"delete {input_dir} or rerun without --resume")
+                if rec.get("cpg") == _file_fingerprint(pkl):
+                    print(f"[RESUME] skip {base}")
+                    records[base] = rec
+                    continue
+                print(f"[RESUME] {pkl.name} changed since {inp.name} was built: re-embedding {base}")
+            elif inp.stat().st_mtime_ns >= pkl.stat().st_mtime_ns:
+                # written before sidecars existed: trust it only if it is newer than its cpg pickle
+                rec = {**_legacy_record(pkl, inp, args), "cpg": _file_fingerprint(pkl),
+                       "settings": settings, "num_classes": num_classes}
+                _sidecar(input_dir, base).write_text(json.dumps(rec, indent=1))
+                print(f"[RESUME] skip {base} (no record; input newer than its cpg pickle, counts recomputed)")
+                records[base] = rec
+                continue
+            else:
+                print(f"[RESUME] {pkl.name} is newer than {inp.name}: re-embedding {base}")
         df = pd.read_pickle(pkl)
+        counts = {k: 0 for k in COUNT_KEYS}
+        node_sum = edge_sum = 0
         rows = []
         for _, row in df.iterrows():
             counts["rows"] += 1
@@ -870,8 +971,21 @@ def embed_generate(args):
                          "commit_id": row.get("commit_id", None), "project": row.get("project", None)})
         out = pd.DataFrame(rows, columns=["input", "target", "func", "idx", "commit_id", "project"])
         dm.write(out, str(input_dir), f"{base}_input.pkl")
+        rec = {"counts": counts, "node_sum": node_sum, "edge_sum": edge_sum,
+               "cpg": _file_fingerprint(pkl), "settings": settings, "num_classes": num_classes}
+        _sidecar(input_dir, base).write_text(json.dumps(rec, indent=1))
+        records[base] = rec
         del df
         gc.collect()
+    # input files without a cpg pickle (a stale slice of an earlier, larger CPG set) would be trained on
+    orphans = sorted(done - set(records))
+    for base in orphans:
+        print(f"[RESUME] removing {base}_input.pkl: no {base}_cpg.pkl in {cpg_dir}")
+        (input_dir / f"{base}_input.pkl").unlink(missing_ok=True)
+        _sidecar(input_dir, base).unlink(missing_ok=True)
+    counts = {k: sum(int(r["counts"].get(k, 0)) for r in records.values()) for k in COUNT_KEYS}
+    node_sum = sum(int(r["node_sum"]) for r in records.values())
+    edge_sum = sum(int(r["edge_sum"]) for r in records.values())
     if counts["graphs"] == 0:
         raise RuntimeError(f"--embed produced no graph from {len(cpg_files)} cpg file(s) "
                            f"(rows {counts['rows']}, rows_without_graph {counts['rows_without_graph']}); "
@@ -881,7 +995,8 @@ def embed_generate(args):
         "num_relations": NUM_RELATIONS * (2 if args.reverse_edges else 1),
         "relations": list(RELATIONS), "node_feat_dim": 768,
         "num_classes": num_classes, "dataset": args.dataset,
-        "counts": counts, "counts_cover": counts_cover, "node_sum": node_sum, "edge_sum": edge_sum,
+        "classes_json": str(classes_json) if classes_json else None,
+        "counts": counts, "counts_cover": "all", "node_sum": node_sum, "edge_sum": edge_sum,
         "nodes_mean": node_sum / counts["graphs"] if counts["graphs"] else None,
         "edges_mean": edge_sum / counts["graphs"] if counts["graphs"] else None,
         "input_files": sorted(p.name for p in input_dir.glob("*_input.pkl")),
@@ -931,7 +1046,7 @@ def build_parser():
     p.add_argument("--normalize_graph_identifiers", action="store_true", help="apply FUN_i/VAR_j normalisation to the Joern input (thesis 3.2.2); text branch keeps raw code")
     p.add_argument("--keep_intermediate", action="store_true")
     p.add_argument("--rescue_stages", default="ABC",
-                   help="rescue stages to try, in order, as letters (default ABC). Stage C (lowercase signature macros "
+                   help="rescue stages to try, as letters from ABC (validated; default ABC). Stage C (lowercase signature macros "
                         "such as av_cold / coroutine_fn, return-type macros) was added after the first BigVul runs; "
                         "pass AB to regenerate a BigVul CPG set with the earlier behaviour")
     p.add_argument("--no_rescue_macros", action="store_true",
@@ -1041,12 +1156,24 @@ def main(argv=None):
         # a run belongs to one dataset: evaluating it on another data_root silently mixes datasets
         current_root = str(Path(args.data_root).resolve())
         stored_root = meta.get("data_root")
+        other_root = stored_root is not None and stored_root != current_root
         if stored_root is None:
             print(f"[WARN] {run_dir / 'args.json'} predates the data_root record; evaluating on {current_root} unchecked")
-        elif stored_root != current_root and not args.allow_other_data_root:
+        elif other_root and not args.allow_other_data_root:
             raise RuntimeError(f"--mode test on a different data_root than the run was trained on:\n"
                                f"  trained on : {stored_root}\n  now        : {current_root}\n"
                                f"pass --allow_other_data_root if this is intended")
+        # whatever the root, the inputs must have the shape the model was built for (a wider head on
+        # a narrower label set would evaluate silently with a macro average over absent classes)
+        target_manifest = Path(args.data_root) / "input" / "manifest.json"
+        if target_manifest.exists():
+            tm = json.loads(target_manifest.read_text())
+            for key, model_val, data_val in (("num_classes", int(meta.get("num_classes", 2)), int(tm.get("num_classes", 2))),
+                                             ("num_relations", int(meta["num_relations"]), int(tm.get("num_relations", NUM_RELATIONS))),
+                                             ("node_feat_dim", int(meta["node_feat_dim"]), int(tm.get("node_feat_dim", 768)))):
+                if model_val != data_val:
+                    raise RuntimeError(f"--mode test: the run's model has {key} {model_val} but {target_manifest} "
+                                       f"says {data_val}; these inputs cannot be evaluated with this checkpoint")
         set_seed(meta["seed"], deterministic=not a.no_deterministic)
         model = build_model(a.model_type, device, num_relations=meta["num_relations"], node_feat_dim=meta["node_feat_dim"],
                             hidden_dim=a.hidden_dim, num_rgcn_layers=a.rgcn_layers, fusion_layers=a.fusion_layers,
@@ -1057,12 +1184,21 @@ def main(argv=None):
         input_dir = Path(args.data_root) / "input"
         val_loader, _ = make_loader(input_dir, "valid", batch_size=args.eval_batch_size, shuffle=False, seed=0)
         test_loader, _ = make_loader(input_dir, "test", batch_size=args.eval_batch_size, shuffle=False, seed=0)
-        res = evaluate_run(model, run_dir, val_loader, test_loader, device)
-        metrics_path = run_dir / "metrics.json"
-        merged = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
-        merged.update(res)          # keep best_epoch / best_val_selection_f1 / select_on from training
-        merged["reevaluated"] = True
-        metrics_path.write_text(json.dumps(merged, indent=1))
+        if other_root:
+            # evaluation on another dataset never overwrites the run's own metrics / predictions
+            out_dir = run_dir / f"reeval_{Path(current_root).name}"
+            out_dir.mkdir(parents=True, exist_ok=True)
+            res = evaluate_run(model, out_dir, val_loader, test_loader, device)
+            res.update({"reevaluated_on": current_root, "trained_on": stored_root})
+            (out_dir / "metrics.json").write_text(json.dumps(res, indent=1))
+            print(f"[TEST] other data_root: results in {out_dir}")
+        else:
+            res = evaluate_run(model, run_dir, val_loader, test_loader, device)
+            metrics_path = run_dir / "metrics.json"
+            merged = json.loads(metrics_path.read_text()) if metrics_path.exists() else {}
+            merged.update(res)          # keep best_epoch / best_val_selection_f1 / select_on from training
+            merged["reevaluated"] = True
+            metrics_path.write_text(json.dumps(merged, indent=1))
         print(json.dumps({k: v for k, v in res.items() if k.startswith("test")}, indent=1))
 
 

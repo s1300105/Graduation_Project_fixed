@@ -20,7 +20,7 @@ pip install --upgrade pip
 pip install torch --index-url https://download.pytorch.org/whl/cu124   # 3090 なら cu124 でよい
 pip install -r requirements.txt                                        # torch_geometric は pure-Python 版で動く（torch_scatter 不要）
 python -c "import torch; print(torch.cuda.is_available(), torch.version.cuda)"   # True を確認
-pytest -q        # 167 件。初回は CodeBERT（約 500 MB）をダウンロードする。CPU で数分
+pytest -q        # 184 件。初回は CodeBERT（約 500 MB）をダウンロードする。CPU で数分
 ```
 
 ## 2. Joern 4
@@ -57,7 +57,7 @@ tail -f logs/cpg_embed.log
 ```
 
 - `--cpg`: 500 関数ずつ Joern を回す（JVM 起動 2 回/スライス）。15 万関数で約 300 スライス。1 スライス 1〜3 分なら合計 5〜15 時間。`--slice_size 1000` で JVM 回数を半減できる（メモリに余裕があれば）。
-- `--embed`: 凍結 CodeBERT でノード特徴を作る。GPU なら fp16 で動く。中断したら同じフラグで `python run.py --embed --resume --dataset bigvul`（フラグが違うと拒否される）。
+- `--embed`: 凍結 CodeBERT でノード特徴を作る。GPU なら fp16 で動く。中断したら同じフラグで `python run.py --embed --resume --dataset bigvul`（フラグが違うと拒否される）。各スライスの横に `<base>_input.meta.json`（元の cpg pickle のサイズと更新時刻、設定、件数）を書き、`--resume` はこれが一致するスライスだけを飛ばす。`--cpg` を作り直した後の `--resume` は、変わったスライスを自動で埋め込み直す（古い入力で学習しない）。記録の無い古いスライスは、入力が cpg pickle より新しいときだけ信用し、件数を数え直す。拒否される場合（フラグ違い、cpg が無い、`--graph_unit` 違い）は既存の `input/` を消さずに止まる。
 - 1200 字フィルタは既定で無効。論文と同じ条件に揃えたいときだけ `--max_chars 1200` を付ける。
 - 終わったら必ず manifest を見る:
 
@@ -69,7 +69,7 @@ cat data/input/manifest.json
   - `rows_lost_in_joern`: Joern で解析できず除外された関数数（論文に書く）。`rescued_stage_A` / `B` / `C` はシグネチャのマクロを除いて救済できた件数（C は小文字マクロと戻り値型マクロ。後から追加したので、古い CPG と比べるときは `--rescue_stages AB`）
   - 除外が多い（1 割超）ときは `python scripts/diagnose_joern_losses.py --split train --slice 0 --max 60` で内訳を見る（`method_dropped` が出たらパイプラインのバグなので報告）
   - `skipped_global`: `<global>` の除外数（0 でなければ修正が効いている）
-  - `positives_after_filter`: 各分割の陽性数
+  - `positives_after_filter`: 各分割の陽性数（ラベルが 0/1 のときだけ。多クラスでは null で、`label_counts` を見る）
   - `nodes_mean` / `edges_mean` / `num_relations`（3。`--reverse_edges` なら 6）
 
 ## 5. 任意: 変種の入力を作る
@@ -198,7 +198,9 @@ python scripts/compare_runs.py --metric macro_f1 --a "runs_poj/poj_hybrid_bs16*"
 
 - 主比較は **5 seed 以上**（1〜2 点の差は 3 seed では見えない。`docs/TASK_SUITE_ja.md` §4）。
 - 多クラスの `history.jsonl` には `val_accuracy` / `val_macro_f1` / `val_top5` が増え、`val_threshold` は null。`mean_p1` / `frac_p1_mid` は最大クラス確率に対する値。
-- `--mode test` は run の `args.json` に記録した `data_root` と違うデータを拒否する（`--allow_other_data_root` で明示的に上書き）。
+- `--mode test` は run の `args.json` に記録した `data_root` と違うデータを拒否する（`--allow_other_data_root` で明示的に許可）。許可した場合も run 自身の `metrics.json` / `*_preds.npz` は上書きせず、`<run>/reeval_<data_root の名前>/` に書く。クラス数・関係数・ノード特徴の次元がチェックポイントと違う入力は、フラグに関係なく拒否する。
+- `metrics.json` の `best_val_selection_f1` は名前を保ったまま、`--select_on` の指標の値を持つ（多クラスでは macro-F1、`accuracy` なら正解率）。どの指標かは `best_val_selection_metric` に書く。
+- `compare_runs.py` は、共有する idx でラベルが食い違う run 同士（別データセットの取り違え）、idx が重複・欠損（-1）の run、共通 idx が無い組を拒否する。共通部分が一部だけのときは件数を表示する。
 - 1000 クラスの CodeNet では `--loss ce` も試す（focal の α は均衡データでは全て ≈ 1 なので差は γ の項だけ）。
 
 ### 11.4 時間の目安（RTX 3090、BigVul 18 万関数の実績から外挿）
