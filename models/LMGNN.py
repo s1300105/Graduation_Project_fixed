@@ -239,8 +239,10 @@ def build_model(model_type: str, device, *, num_relations: int = 3, node_feat_di
                 hidden_dim: int = 200, num_rgcn_layers: int = 6, fusion_layers: int = 3,
                 tune_last_n_layers: int = 2, max_length: int = 512, ablation: str = "none",
                 gate_temperature: float = 1.0, rgcn_residual: bool = True, input_norm: bool = True,
-                use_node_labels: bool = True, seed: int = 0, num_classes: int = 2):
-    """model_type: hybrid | codebert | graph_only.
+                use_node_labels: bool = True, seed: int = 0, num_classes: int = 2,
+                model_name: str = CODEBERT, num_node_labels: int = NUM_NODE_LABELS):
+    """model_type: hybrid | codebert | graph_only ("codebert" = the text-only arm, whatever
+    ``model_name`` is: CodeBERT for code, a chemical LM for SMILES, ...).
     ablation: none | no_gate | no_cls_skip | shuffle_edges | no_input_norm | no_residual
     (no_gate / no_cls_skip need the fusion, i.e. the hybrid; codebert takes none).
     num_classes: width of the classifier's last layer (2 = BigVul-style binary,
@@ -252,13 +254,13 @@ def build_model(model_type: str, device, *, num_relations: int = 3, node_feat_di
     if model_type == "codebert":
         if ablation != "none":
             raise ValueError("ablations apply to hybrid / graph_only only; the CodeBERT baseline has no graph branch")
-        return CodeBERTOnly(device=device, tune_last_n_layers=tune_last_n_layers,
-                            max_length=max_length, hidden_dim=hidden_dim, num_classes=num_classes).to(device)
+        return CodeBERTOnly(device=device, tune_last_n_layers=tune_last_n_layers, max_length=max_length,
+                            hidden_dim=hidden_dim, num_classes=num_classes, model_name=model_name).to(device)
     kw = dict(node_feat_dim=node_feat_dim, hidden_dim=hidden_dim, num_rgcn_layers=num_rgcn_layers,
               num_relations=num_relations, fusion_layers=fusion_layers, tune_last_n_layers=tune_last_n_layers,
               max_length=max_length, device=device, gate_temperature=gate_temperature,
               rgcn_residual=rgcn_residual, input_norm=input_norm, use_node_labels=use_node_labels, seed=seed,
-              num_classes=num_classes)
+              num_classes=num_classes, model_name=model_name, num_node_labels=num_node_labels)
     if model_type == "graph_only":
         if ablation in ("no_gate", "no_cls_skip"):
             raise ValueError(f"ablation {ablation} needs the fusion module; graph_only has none")

@@ -35,7 +35,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import IterableDataset, DataLoader
 from torch_geometric.data import Batch
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import roc_auc_score, average_precision_score, accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 if str(PROJECT_ROOT) not in sys.path:
@@ -43,10 +43,11 @@ if str(PROJECT_ROOT) not in sys.path:
 
 from utils.data import datamanager as dm                       # noqa: E402
 from utils.process import cpg_generator as cpgproc              # noqa: E402
-from utils.functions.cpg import parse_to_functions, RELATIONS   # noqa: E402
+from utils.functions.cpg import parse_to_functions, RELATIONS, NUM_NODE_LABELS  # noqa: E402
 from utils.process.embeddings import nodes_to_input, NUM_RELATIONS  # noqa: E402
 from utils.functions.parse import clean_gadget                  # noqa: E402
 from models.LMGNN import build_model                            # noqa: E402
+from models.LMGNN import CODEBERT  # noqa: E402  default text model
 
 
 # ============================================================================
@@ -361,6 +362,15 @@ def best_threshold(probs, labels):
     return best
 
 
+def binary_auc(probs, labels):
+    """(ROC-AUC, PR-AUC) of 1-D P(y=1); (None, None) when a split holds one class only.
+    Threshold-free, the standard metric for MoleculeNet-style tasks; reported next to F1."""
+    probs, labels = np.asarray(probs), np.asarray(labels)
+    if probs.ndim != 1 or len(np.unique(labels)) < 2:
+        return None, None
+    return float(roc_auc_score(labels, probs)), float(average_precision_score(labels, probs))
+
+
 # ============================================================================
 # training
 # ============================================================================
@@ -481,6 +491,8 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
     set_seed(seed, deterministic=not args.no_deterministic)
     num_classes = int(num_classes)
     multiclass = num_classes != 2
+    if multiclass and args.select_on == "auc":
+        raise RuntimeError("--select_on auc is defined for binary runs (ROC-AUC of P(y=1)); use macro_f1 or accuracy")
     if not multiclass and args.select_on == "macro_f1":
         raise RuntimeError("--select_on macro_f1 is defined for multi-class runs; the binary task selects on "
                            "tuned / f1_05 / accuracy")
@@ -506,11 +518,15 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
         raise RuntimeError("test split is empty; the run would have nothing to evaluate (need test_*_input.pkl)")
     run_dir.mkdir(parents=True, exist_ok=True)
 
+    manifest_path = input_dir / "manifest.json"
+    input_manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
+    text_model, num_node_labels = resolve_text_model_and_labels(args, input_manifest)
     model = build_model(args.model_type, device, num_relations=num_relations, node_feat_dim=node_feat_dim,
                         hidden_dim=args.hidden_dim, num_rgcn_layers=args.rgcn_layers,
                         fusion_layers=args.fusion_layers, tune_last_n_layers=args.tune_last_n_layers,
                         max_length=args.max_length, ablation=args.ablation,
-                        gate_temperature=args.gate_temperature, seed=seed, num_classes=num_classes)
+                        gate_temperature=args.gate_temperature, seed=seed, num_classes=num_classes,
+                        model_name=text_model, num_node_labels=num_node_labels)
     n_new = sum(p.numel() for n, p in model.named_parameters() if "func_encoder" not in n)
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -523,14 +539,13 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
         from transformers import get_linear_schedule_with_warmup
         scheduler = get_linear_schedule_with_warmup(optimizer, int(args.warmup_ratio * total_steps), total_steps)
 
-    manifest_path = input_dir / "manifest.json"
-    input_manifest = json.loads(manifest_path.read_text()) if manifest_path.exists() else None
     meta = {
         "args": vars(args), "batch_size": batch_size, "lr": lr, "bert_lr_ratio": ratio, "seed": seed,
         "git_commit": git_commit(), "class_counts": {str(i): int(c) for i, c in enumerate(class_counts)},
         "alpha": alpha.tolist(),
         "train_samples_per_epoch": max_samples or total, "num_relations": num_relations,
         "node_feat_dim": node_feat_dim, "num_classes": num_classes,
+        "text_model": text_model, "num_node_labels": num_node_labels,
         "dataset": args.dataset, "data_root": str(Path(args.data_root).resolve()),
         "graph_unit": (input_manifest or {}).get("graph_unit", getattr(args, "graph_unit", "first_method")),
         "input_manifest": input_manifest,
@@ -569,9 +584,11 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
             "mean_p1": float(p_stat.mean()), "frac_p1_mid": float(((p_stat > 0.05) & (p_stat < 0.95)).mean()),
             "elapsed_s": time.time() - t0,
         }
-        if multiclass:      # extra keys only here: the binary history schema is frozen (golden test)
+        if multiclass:
             rec.update({"val_accuracy": mt["accuracy"], "val_macro_f1": mt["macro_f1"], "val_top5": mt["top5_accuracy"],
                         "p1_meaning": "max_class_probability"})
+        else:               # added keys only; the recorded binary keys and values are frozen (golden test)
+            rec["val_auc"], rec["val_pr_auc"] = binary_auc(probs, labels)
         with hist_path.open("a") as fh:
             fh.write(json.dumps(rec) + "\n")
         if multiclass:
@@ -582,6 +599,7 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
         else:
             print(f"[E{epoch:03d}] loss {tr['train_loss']:.4f} | val CE {val_loss:.4f} F1@0.5 {m05['f1']:.4f} "
                   f"F1*={mt['f1']:.4f}@{mt['threshold']:.2f} P {mt['precision']:.3f} R {mt['recall']:.3f}"
+                  + (f" AUC {rec['val_auc']:.4f}" if rec.get("val_auc") is not None else "")
                   + (f" | gate code {tr['gate_code']:.2f}" if tr["gate_code"] is not None else ""))
         if args.select_on == "tuned":
             selection = mt["f1"]                        # binary: F1 at the tuned threshold; multi-class: macro-F1
@@ -591,6 +609,8 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
             selection = mt["accuracy"]
         elif args.select_on == "macro_f1":
             selection = mt["macro_f1"]
+        elif args.select_on == "auc":
+            selection = rec["val_auc"] if rec["val_auc"] is not None else -1.0
         else:
             raise ValueError(f"unknown --select_on {args.select_on}")
         if selection > best_f1 + 1e-4:
@@ -606,7 +626,8 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
     model.load_state_dict(torch.load(run_dir / "best.pth", map_location=device))
     result = evaluate_run(model, run_dir, val_loader, test_loader, device)
     # best_val_selection_f1 keeps its (frozen) name; it holds the value of the metric named here
-    sel_metric = ("accuracy" if args.select_on == "accuracy" else
+    sel_metric = ("roc_auc" if args.select_on == "auc" else
+                  "accuracy" if args.select_on == "accuracy" else
                   "macro_f1" if multiclass or args.select_on == "macro_f1" else
                   "f1_tuned_threshold" if args.select_on == "tuned" else "f1_at_0.5")
     result.update({"best_epoch": best_epoch, "best_val_selection_f1": best_f1, "select_on": args.select_on,
@@ -633,11 +654,15 @@ def evaluate_run(model, run_dir: Path, val_loader, test_loader, device):
     vt = best_threshold(vp, vl)
     out = {"val_05": metrics_at(vp, vl, 0.5), "val_tuned": vt, "val_loss": vloss,
            "num_classes": int(vp.shape[1]) if vp.ndim == 2 else 2}
+    if vp.ndim == 1:
+        out["val_auc"], out["val_pr_auc"] = binary_auc(vp, vl)
     np.savez(run_dir / "val_preds.npz", probs=vp, labels=vl, idx=vi)
     if test_loader is not None:
         tp, tl, ti, tloss = predict(model, test_loader, device)
         out.update({"test_05": metrics_at(tp, tl, 0.5), "test_tuned": metrics_at(tp, tl, vt["threshold"]),
                     "test_loss": tloss})
+        if tp.ndim == 1:
+            out["test_auc"], out["test_pr_auc"] = binary_auc(tp, tl)
         np.savez(run_dir / "test_preds.npz", probs=tp, labels=tl, idx=ti)
     return out
 
@@ -1005,6 +1030,80 @@ def embed_generate(args):
     print("[EMBED]", json.dumps(manifest))
 
 
+DEFAULT_MOL_TEXT_MODEL = "DeepChem/ChemBERTa-77M-MLM"
+
+
+def mol_generate(args):
+    """--molgraph: jsonl splits whose ``func`` is a SMILES string -> <data_root>/input/*_input.pkl.
+
+    The chemistry counterpart of --cpg + --embed: the molecular graph (atoms, bonds typed as
+    single / double / triple / aromatic / misc, OGB one-hot atom features; utils/process/molgraph.py)
+    replaces the Joern CPG with frozen-CodeBERT node features, and input/manifest.json records the
+    chemical language model the text branch should use. Deterministic; no GPU needed."""
+    from utils.process.molgraph import (smiles_to_data, ATOM_FEAT_DIM, NUM_ATOM_LABELS, NUM_BOND_RELATIONS,
+                                        BOND_TYPES)
+    data_root = Path(args.data_root)
+    input_dir = data_root / "input"
+    frames = [(split, read_jsonl(path)) for split, path in
+              (("train", args.train_jsonl), ("valid", args.valid_jsonl), ("test", args.test_jsonl))]
+    classes_json = _classes_json(args, {})
+    n_listed = len(json.loads(classes_json.read_text())) if classes_json else None
+    t_max = max(int(df["target"].max()) for _, df in frames if len(df))
+    num_classes = int(args.num_classes or n_listed or max(2, t_max + 1))
+    if t_max >= num_classes:
+        raise RuntimeError(f"targets up to {t_max} but num_classes is {num_classes}")
+    if input_dir.exists():
+        shutil.rmtree(input_dir)
+    input_dir.mkdir(parents=True)
+    counts = {k: 0 for k in COUNT_KEYS}
+    node_sum = edge_sum = 0
+    per_split = {}
+    for split, df in frames:
+        rows, lost = [], []
+        for rec in df.to_dict("records"):
+            counts["rows"] += 1
+            g = smiles_to_data(rec["func"], rec["target"])
+            if g is None:
+                counts["rows_without_graph"] += 1
+                lost.append(rec.get("idx"))
+                continue
+            g.func = rec["func"]
+            g.idx = int(rec["idx"])
+            counts["graphs"] += 1
+            node_sum += int(g.num_nodes)
+            edge_sum += int(g.edge_index.size(1))
+            rows.append({"input": g, "target": int(rec["target"]), "func": rec["func"], "idx": g.idx,
+                         "commit_id": None, "project": rec.get("project")})
+        out = pd.DataFrame(rows, columns=["input", "target", "func", "idx", "commit_id", "project"])
+        dm.write(out, str(input_dir), f"{split}_0_input.pkl")
+        per_split[split] = {"rows": len(df), "graphs": len(rows), "lost_idx": lost[:20],
+                            "label_counts": {str(k): int(v) for k, v in out["target"].value_counts().sort_index().items()}}
+    if counts["graphs"] == 0:
+        raise RuntimeError("--molgraph produced no graph (is func a SMILES column?)")
+    manifest = {
+        "graph_unit": "molecule", "featuriser": "ogb_atom_onehot_v1",
+        "reverse_edges": False, "max_nodes": None, "node_embedding": "ogb_atom_onehot",
+        "num_relations": NUM_BOND_RELATIONS, "relations": list(BOND_TYPES), "node_feat_dim": ATOM_FEAT_DIM,
+        "num_node_labels": NUM_ATOM_LABELS, "num_classes": num_classes, "dataset": args.dataset,
+        "text_model": args.text_model or DEFAULT_MOL_TEXT_MODEL,
+        "classes_json": str(classes_json) if classes_json else None,
+        "counts": counts, "counts_cover": "all", "splits": per_split, "node_sum": node_sum, "edge_sum": edge_sum,
+        "nodes_mean": node_sum / counts["graphs"], "edges_mean": edge_sum / counts["graphs"],
+        "input_files": sorted(p.name for p in input_dir.glob("*_input.pkl")),
+    }
+    (input_dir / "manifest.json").write_text(json.dumps(manifest, indent=1))
+    print("[MOLGRAPH]", json.dumps({k: v for k, v in manifest.items() if k != "splits"}))
+
+
+def resolve_text_model_and_labels(args, input_manifest):
+    """Text encoder (HF id) and node-label vocabulary size of a run. The input builder records
+    both in input/manifest.json (Joern CPGs: CodeBERT and the Joern node labels; molecules: a
+    chemical LM and atom types); --text_model overrides the encoder as an explicit experiment."""
+    m = input_manifest or {}
+    text_model = getattr(args, "text_model", None) or m.get("text_model") or CODEBERT
+    return text_model, int(m.get("num_node_labels", NUM_NODE_LABELS))
+
+
 def load_input_manifest(args):
     """(num_relations, node_feat_dim, num_classes) from input/manifest.json. An
     old manifest without num_classes is binary (2). --num_classes may repeat the
@@ -1027,6 +1126,9 @@ def build_parser():
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("--cpg", action="store_true", help="generate CPGs from the jsonl splits")
     p.add_argument("--embed", action="store_true", help="generate PyG inputs from the CPGs")
+    p.add_argument("--molgraph", action="store_true",
+                   help="chemistry: build molecular-graph inputs from jsonl splits whose func is a SMILES string "
+                        "(replaces --cpg/--embed; see data/scripts/make_molnet_json.py)")
     p.add_argument("--resume", action="store_true", help="(--embed) keep already generated input files")
     p.add_argument("--mode", choices=["train", "test", "none"], default="none")
     # data
@@ -1062,6 +1164,9 @@ def build_parser():
     # model
     p.add_argument("--model_type", choices=["hybrid", "codebert", "graph_only"], default="hybrid")
     p.add_argument("--ablation", choices=["none", "no_gate", "no_cls_skip", "shuffle_edges", "no_input_norm", "no_residual"], default="none")
+    p.add_argument("--text_model", default=None,
+                   help="HF id of the text-branch encoder (default: input/manifest.json's text_model, else "
+                        "microsoft/codebert-base). Recorded in args.json")
     p.add_argument("--hidden_dim", type=int, default=200)
     p.add_argument("--rgcn_layers", type=int, default=6)
     p.add_argument("--fusion_layers", type=int, default=3)
@@ -1075,7 +1180,7 @@ def build_parser():
     p.add_argument("--seeds", type=int, nargs="+", default=[0])
     p.add_argument("--epochs", type=int, default=200)
     p.add_argument("--patience", type=int, default=50)
-    p.add_argument("--select_on", choices=["tuned", "f1_05", "accuracy", "macro_f1"], default="tuned",
+    p.add_argument("--select_on", choices=["tuned", "f1_05", "accuracy", "macro_f1", "auc"], default="tuned",
                    help="validation metric for checkpoint selection. Binary: tuned = F1 at the tuned threshold, "
                         "f1_05 = F1 at 0.5, accuracy = accuracy at the tuned threshold. Multi-class: tuned and "
                         "macro_f1 = macro-F1 (argmax), f1_05 = the same, accuracy = accuracy")
@@ -1110,6 +1215,10 @@ def main(argv=None):
             setattr(args, f"{split}_jsonl", str(Path(args.data_root) / "cleaned_data" / f"{args.dataset}_{split}.jsonl"))
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    if args.molgraph and (args.cpg or args.embed):
+        raise SystemExit("--molgraph replaces --cpg / --embed; do not combine them")
+    if args.molgraph:
+        mol_generate(args)
     if args.cpg:
         cpg_generate(args)
     if args.embed:
@@ -1179,7 +1288,9 @@ def main(argv=None):
                             hidden_dim=a.hidden_dim, num_rgcn_layers=a.rgcn_layers, fusion_layers=a.fusion_layers,
                             tune_last_n_layers=a.tune_last_n_layers, max_length=a.max_length, ablation=a.ablation,
                             gate_temperature=a.gate_temperature, seed=meta["seed"],
-                            num_classes=int(meta.get("num_classes", 2)))
+                            num_classes=int(meta.get("num_classes", 2)),
+                            model_name=meta.get("text_model") or CODEBERT,
+                            num_node_labels=int(meta.get("num_node_labels", NUM_NODE_LABELS)))
         model.load_state_dict(torch.load(run_dir / "best.pth", map_location=device))
         input_dir = Path(args.data_root) / "input"
         val_loader, _ = make_loader(input_dir, "valid", batch_size=args.eval_batch_size, shuffle=False, seed=0)

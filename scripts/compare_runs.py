@@ -25,7 +25,7 @@ from pathlib import Path
 
 import numpy as np
 
-METRICS = ("f1", "macro_f1", "accuracy")
+METRICS = ("f1", "macro_f1", "accuracy", "auc")
 
 
 def load_group(pattern, threshold):
@@ -125,6 +125,25 @@ def macro_f1(pred, y, C):
     return float(np.mean(f1s))
 
 
+def roc_auc(scores, y):
+    """ROC-AUC by the rank statistic (ties get average ranks); None if y holds one class."""
+    y = np.asarray(y).astype(bool)
+    n_pos = int(y.sum()); n_neg = int(len(y) - n_pos)
+    if n_pos == 0 or n_neg == 0:
+        return None
+    order = np.argsort(scores, kind="mergesort")
+    ranks = np.empty(len(scores), dtype=np.float64)
+    s_sorted = np.asarray(scores)[order]
+    i = 0
+    while i < len(s_sorted):
+        j = i
+        while j + 1 < len(s_sorted) and s_sorted[j + 1] == s_sorted[i]:
+            j += 1
+        ranks[order[i:j + 1]] = (i + j) / 2.0 + 1.0
+        i = j + 1
+    return float((ranks[y].sum() - n_pos * (n_pos + 1) / 2.0) / (n_pos * n_neg))
+
+
 def group_metric(group, metric, sample_idx=None):
     """Seed-averaged ``metric`` of a group, optionally on the resampled items ``sample_idx``."""
     if metric not in METRICS:
@@ -135,6 +154,17 @@ def group_metric(group, metric, sample_idx=None):
                 raise SystemExit(f"--metric f1 is the positive-class F1 of a binary task, but {r['name']} holds "
                                  f"[N, {num_classes_of(r)}] multi-class probabilities; use --metric macro_f1 or accuracy")
         return group_f1(group, sample_idx)
+    if metric == "auc":
+        vals = []
+        for r in group:
+            if r["probs"].ndim == 2:
+                raise SystemExit(f"--metric auc is the ROC-AUC of P(y=1) of a binary task; {r['name']} is multi-class")
+            p, y = r["probs"], r["labels"]
+            if sample_idx is not None:
+                p, y = p[sample_idx], y[sample_idx]
+            a = roc_auc(p, y)
+            vals.append(0.5 if a is None else a)       # a resample with one class carries no ranking information
+        return float(np.mean(vals)), vals
     vals = []
     for r in group:
         pred = predictions(r)
@@ -154,7 +184,8 @@ def main(argv=None):
     ap.add_argument("--b", required=True, help="glob of run dirs (group B, e.g. baseline seeds)")
     ap.add_argument("--threshold", default="tuned")
     ap.add_argument("--metric", choices=METRICS, default="f1",
-                    help="f1 = positive-class F1 (binary only); macro_f1 / accuracy work for binary and multi-class runs")
+                    help="f1 = positive-class F1 (binary only); auc = ROC-AUC of P(y=1) (binary only, threshold-free; "
+                         "the MoleculeNet metric); macro_f1 / accuracy work for binary and multi-class runs")
     ap.add_argument("--n_boot", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args(argv)
@@ -168,7 +199,7 @@ def main(argv=None):
     C = classes.pop()
     fa, fa_each = group_metric(A, args.metric)
     fb, fb_each = group_metric(B, args.metric)
-    label = {"f1": "F1", "macro_f1": "macro-F1", "accuracy": "accuracy"}[args.metric]
+    label = {"f1": "F1", "macro_f1": "macro-F1", "accuracy": "accuracy", "auc": "ROC-AUC"}[args.metric]
     if C == 2:
         print(f"test samples aligned by idx: {n} (positives {int(A[0]['labels'].sum())})")
     else:

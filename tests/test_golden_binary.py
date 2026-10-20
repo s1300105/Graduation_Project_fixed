@@ -71,7 +71,8 @@ def test_binary_outputs_are_bit_identical(golden, golden_root, model_type, ablat
     for k in ("val_05", "val_tuned", "test_05", "test_tuned", "val_loss", "test_loss", "best_epoch", "best_val_selection_f1", "select_on"):
         assert m[k] == ref["metrics"][k], k
     hist = [json.loads(l) for l in (d / "history.jsonl").read_text().splitlines()]
-    assert sorted(hist[0]) == ref["history_keys"]          # the binary history schema is frozen
+    # every recorded key keeps its value; later changes may only ADD keys (e.g. val_auc)
+    assert set(ref["history_keys"]) <= set(hist[0])
     for h, hr in zip(hist, ref["history"]):
         for k in ref["history_keys"]:
             if k == "elapsed_s":
