@@ -86,7 +86,7 @@ python scripts/length_strata.py --group codebert "runs/codebert_bs16_lr1.0e-04_b
     --group hybrid "runs/hybrid_bs16_lr1.0e-04_br0.30_seed*" --bigvul_csv data/raw/MSR_data_cleaned.csv --out runs/length_strata
 ```
 
-### 化学（SMILES ＋ 分子グラフ。詳細は `docs/CHEM_PROTOCOL_ja.md` と RUNBOOK §12）
+### 化学（SMILES ＋ 分子グラフ。設計は `docs/CHEM_PROTOCOL_ja.md`、結果は `docs/CHEM_RESULTS_ja.md`、手順は RUNBOOK §12）
 
 同じ分子を、化学言語モデル（ChemBERTa-2）が SMILES 文字列として、R-GCN が分子グラフ（原子＝ノード、結合の型＝関係）として読む。コードの CPG の代わりに `run.py --molgraph` で入力を作る以外は、学習・比較の仕組みはコードと同じ。
 

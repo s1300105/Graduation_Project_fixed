@@ -126,6 +126,44 @@ def test_molgraph_stage_and_hybrid_no_edges_train_end_to_end(tmp_path, monkeypat
         assert all("val_auc" in h for h in hist)
 
 
+def _toy_splits(tmp_path, valid_targets=None):
+    cleaned = tmp_path / "cleaned_data"
+    cleaned.mkdir(exist_ok=True)
+    for split, n in (("train", 40), ("valid", 8), ("test", 8)):
+        rows = [{"idx": i, "func": SMILES[i % len(SMILES)],
+                 "target": int(valid_targets[i]) if split == "valid" and valid_targets else int(i < n // 2)}
+                for i in range(n)]
+        (cleaned / f"toy_{split}.jsonl").write_text("\n".join(json.dumps(r) for r in rows) + "\n")
+
+
+def test_molgraph_rows_are_shuffled_not_label_sorted(tmp_path):
+    # the OGB files are sorted by idx with labels in long runs, and the training stream shuffles only inside
+    # blocks of 256 in file order: the registered grid was trained label block by label block (protocol, addendum 2)
+    _toy_splits(tmp_path)
+    orders = []
+    for _ in range(2):
+        R.main(["--molgraph", "--dataset", "toy", "--data_root", str(tmp_path)])
+        df = pd.read_pickle(tmp_path / "input" / "train_0_input.pkl")
+        orders.append(df["idx"].tolist())
+        assert sorted(orders[-1]) == list(range(40))
+        assert set(df["target"][:20]) == {0, 1}              # the first half is not a single label run
+    assert orders[0] == orders[1] != list(range(40))         # fixed by --seed, not the file order
+    assert json.loads((tmp_path / "input" / "manifest.json").read_text())["row_order"] == "shuffled(seed=42)"
+
+
+def test_binary_auc_of_a_diverged_run_is_none():
+    assert R.binary_auc(np.array([0.2, np.nan, 0.7]), np.array([0, 1, 1])) == (None, None)
+
+
+def test_select_on_auc_stops_on_a_one_class_validation_split(tmp_path):
+    _toy_splits(tmp_path, valid_targets=[1] * 8)
+    R.main(["--molgraph", "--dataset", "toy", "--data_root", str(tmp_path)])
+    with pytest.raises(RuntimeError, match="one class"):
+        R.main(["--mode", "train", "--data_root", str(tmp_path), "--runs_dir", str(tmp_path / "runs"), "--epochs", "2",
+                "--hidden_dim", "16", "--rgcn_layers", "2", "--batch_sizes", "8", "--eval_batch_size", "8",
+                "--seeds", "0", "--loss", "ce", "--select_on", "auc", "--model_type", "graph_only"])
+
+
 def test_no_edges_ablation_ignores_the_graph_structure():
     torch.manual_seed(0)
     m = build_model("graph_only", torch.device("cpu"), num_relations=5, node_feat_dim=174, hidden_dim=16,

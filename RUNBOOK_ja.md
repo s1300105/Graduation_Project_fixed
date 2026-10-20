@@ -215,7 +215,9 @@ python scripts/compare_runs.py --metric macro_f1 --a "runs_poj/poj_hybrid_bs16*"
 
 ## 12. 化学（分子）: SMILES ＋ 分子グラフ
 
-設計と事前登録は `docs/CHEM_PROTOCOL_ja.md`。BACE と BBBP は CPU でも回る（この repo の結果 `docs/results/chem_cpu_v1/` は 4 コア CPU で作った）。HIV と 10 seed・100 エポックの本番は GPU で回す。
+設計と事前登録は `docs/CHEM_PROTOCOL_ja.md`、結果は `docs/CHEM_RESULTS_ja.md`。BACE と BBBP は CPU でも回る（この repo の結果は 4 コア CPU で作った）。HIV と 10 seed・100 エポックの本番は GPU で回す。
+
+**`docs/results/chem_cpu_v1/` は学習データの行順に欠陥があった登録 run**（追補 2）。この版より前の `run.py --molgraph` で作った入力（manifest に `row_order` が無いもの）は、作り直してから学習する。訂正後の結果は `docs/results/chem_cpu_v2/`。
 
 ```bash
 pip install rdkit                      # 結果は RDKit 2026.09.1 で作った（版で解析できる SMILES と原子特徴が少し変わる）

@@ -363,10 +363,11 @@ def best_threshold(probs, labels):
 
 
 def binary_auc(probs, labels):
-    """(ROC-AUC, PR-AUC) of 1-D P(y=1); (None, None) when a split holds one class only.
+    """(ROC-AUC, PR-AUC) of 1-D P(y=1); (None, None) when a split holds one class only or a
+    probability is not finite (a diverged run has no AUC; selection then never picks that epoch).
     Threshold-free, the standard metric for MoleculeNet-style tasks; reported next to F1."""
     probs, labels = np.asarray(probs), np.asarray(labels)
-    if probs.ndim != 1 or len(np.unique(labels)) < 2:
+    if probs.ndim != 1 or len(np.unique(labels)) < 2 or not np.isfinite(probs).all():
         return None, None
     return float(roc_auc_score(labels, probs)), float(average_precision_score(labels, probs))
 
@@ -474,6 +475,8 @@ def plot_curves(run_dir: Path):
         axes[1].plot(ep, [h.get("val_f1_05") for h in hist], label="val F1 @0.5")
         axes[1].plot(ep, [h.get("val_precision_tuned") for h in hist], label="val P (tuned)")
         axes[1].plot(ep, [h.get("val_recall_tuned") for h in hist], label="val R (tuned)")
+        if any(h.get("val_auc") is not None for h in hist):
+            axes[1].plot(ep, [h.get("val_auc") for h in hist], label="val ROC-AUC")
         axes[1].set_title("validation"); axes[1].legend()
     if any(h.get("gate_code") is not None for h in hist):
         axes[2].plot(ep, [h.get("gate_code") for h in hist], marker="o", label="gate: code")
@@ -590,6 +593,9 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
                         "p1_meaning": "max_class_probability"})
         else:               # added keys only; the recorded binary keys and values are frozen (golden test)
             rec["val_auc"], rec["val_pr_auc"] = binary_auc(probs, labels)
+            if args.select_on == "auc" and len(np.unique(labels)) < 2:
+                raise RuntimeError("--select_on auc: the validation split holds one class, so its ROC-AUC is "
+                                   "undefined and no epoch could be selected")
         with hist_path.open("a") as fh:
             fh.write(json.dumps(rec) + "\n")
         if multiclass:
@@ -652,7 +658,9 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
               + f", best epoch {best_epoch}")
     else:
         print(f"[DONE] {run_dir.name}: test F1 {tt['f1']:.4f} (thr {_fmt_thr(tt['threshold'])}), "
-              f"F1@0.5 {result['test_05']['f1']:.4f}, best epoch {best_epoch}")
+              f"F1@0.5 {result['test_05']['f1']:.4f}"
+              + (f", ROC-AUC {result['test_auc']:.4f}" if result.get("test_auc") is not None else "")
+              + f", best epoch {best_epoch}")
     return result
 
 
@@ -1042,7 +1050,7 @@ def embed_generate(args):
     print("[EMBED]", json.dumps(manifest))
 
 
-DEFAULT_MOL_TEXT_MODEL = "DeepChem/ChemBERTa-77M-MLM"
+DEFAULT_MOL_TEXT_MODEL = "DeepChem/ChemBERTa-77M-MTR"
 
 
 def mol_generate(args):
@@ -1071,6 +1079,10 @@ def mol_generate(args):
     node_sum = edge_sum = 0
     per_split = {}
     for split, df in frames:
+        # a fixed random row order, as cpg_generate has: the training stream shuffles only inside blocks of
+        # 256 graphs whose order is the file's, so the OGB files (sorted by idx, labels in long runs) were
+        # trained label block by label block (BACE: positives, then ~700 negatives) in every epoch
+        df = df.sample(frac=1, random_state=args.seed).reset_index(drop=True)
         rows, lost = [], []
         for rec in df.to_dict("records"):
             counts["rows"] += 1
@@ -1093,7 +1105,7 @@ def mol_generate(args):
     if counts["graphs"] == 0:
         raise RuntimeError("--molgraph produced no graph (is func a SMILES column?)")
     manifest = {
-        "graph_unit": "molecule", "featuriser": "ogb_atom_onehot_v1",
+        "graph_unit": "molecule", "featuriser": "ogb_atom_onehot_v1", "row_order": f"shuffled(seed={args.seed})",
         "reverse_edges": False, "max_nodes": None, "node_embedding": "ogb_atom_onehot",
         "num_relations": NUM_BOND_RELATIONS, "relations": list(BOND_TYPES), "node_feat_dim": ATOM_FEAT_DIM,
         "num_node_labels": NUM_ATOM_LABELS, "num_classes": num_classes, "dataset": args.dataset,
@@ -1199,8 +1211,9 @@ def build_parser():
     p.add_argument("--patience", type=int, default=50)
     p.add_argument("--select_on", choices=["tuned", "f1_05", "accuracy", "macro_f1", "auc"], default="tuned",
                    help="validation metric for checkpoint selection. Binary: tuned = F1 at the tuned threshold, "
-                        "f1_05 = F1 at 0.5, accuracy = accuracy at the tuned threshold. Multi-class: tuned and "
-                        "macro_f1 = macro-F1 (argmax), f1_05 = the same, accuracy = accuracy")
+                        "f1_05 = F1 at 0.5, accuracy = accuracy at the tuned threshold, auc = ROC-AUC of P(y=1) "
+                        "(threshold-free; binary only). Multi-class: tuned and macro_f1 = macro-F1 (argmax), "
+                        "f1_05 = the same, accuracy = accuracy")
     p.add_argument("--subset_frac", type=float, default=1.0, help="fraction of the training set used per epoch (resampled every epoch)")
     p.add_argument("--loss", choices=["focal", "weighted_ce", "ce"], default="focal")
     p.add_argument("--focal_gamma", type=float, default=2.0)
@@ -1208,7 +1221,7 @@ def build_parser():
     p.add_argument("--warmup_ratio", type=float, default=0.1)
     p.add_argument("--clip_grad", type=float, default=1.0)
     p.add_argument("--eval_batch_size", type=int, default=16)
-    p.add_argument("--seed", type=int, default=42, help="seed for data shuffling at --cpg time")
+    p.add_argument("--seed", type=int, default=42, help="seed of the row order written by --cpg / --molgraph")
     p.add_argument("--no_deterministic", action="store_true")
     p.add_argument("--runs_dir", default="runs")
     p.add_argument("--run_prefix", default="", help="prefix of the run directory name, e.g. 'poj104_' (default: none)")
@@ -1254,9 +1267,13 @@ def main(argv=None):
                         results.append((run_name_for(args, bs, lr, ratio, seed), r))
         if multiclass:
             print(f"\n===== SUMMARY ({num_classes} classes, argmax; test macro-F1 / accuracy) =====")
+        elif args.select_on == "auc":
+            print("\n===== SUMMARY (test ROC-AUC; F1 at the validation-tuned threshold for reference) =====")
         else:
             print("\n===== SUMMARY (test F1 at validation-tuned threshold) =====")
-        for name, r in sorted(results, key=lambda x: -x[1]["test_tuned"]["f1"]):
+        by_auc = not multiclass and args.select_on == "auc"
+        for name, r in sorted(results, key=lambda x: -(x[1].get("test_auc") or -1.0) if by_auc
+                              else -x[1]["test_tuned"]["f1"]):
             tt = r["test_tuned"]
             if multiclass:
                 print(f"{name}: test macro-F1 {tt['macro_f1']:.4f} | accuracy {tt['accuracy']:.4f}"
@@ -1264,7 +1281,9 @@ def main(argv=None):
                       + f" | best epoch {r['best_epoch']}")
             else:
                 print(f"{name}: test F1 {tt['f1']:.4f} (thr {_fmt_thr(tt['threshold'])}) | "
-                      f"F1@0.5 {r['test_05']['f1']:.4f} | best epoch {r['best_epoch']}")
+                      f"F1@0.5 {r['test_05']['f1']:.4f}"
+                      + (f" | ROC-AUC {r['test_auc']:.4f}" if r.get("test_auc") is not None else "")
+                      + f" | best epoch {r['best_epoch']}")
         if len(args.seeds) > 1:
             by_cfg = {}
             for name, r in results:
