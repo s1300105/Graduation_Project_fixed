@@ -21,10 +21,11 @@ split -> <out_dir>/<dataset>_{train,valid,test}.jsonl + classes.json + prep_stat
 
 Split (default ``scaffold``): deterministic Bemis-Murcko scaffold split 80/10/10 as in Hu et al.
 2020 ("Strategies for Pre-training Graph Neural Networks", chem/splitters.py): scaffolds with
-chirality, scaffold sets sorted by size (largest first, ties by first occurrence), train filled
+chirality, scaffold sets sorted by (size, first index) in descending order as in Hu et al. (largest
+first; among equal sizes the set with the larger first index first), train filled
 first, then valid, then test. Molecules of one scaffold never cross splits, so the test set holds
 structurally new molecules. ``random`` is a stratified random split (for contrast only);
-``ogb`` uses OGB's shipped split indices (ogb_molhiv only).
+``ogb`` uses OGB's shipped split indices (the default for every ogb_* dataset).
 
 Row fields follow utils/data/prep.py with lang 'smiles' and ext null (no Joern).
 """

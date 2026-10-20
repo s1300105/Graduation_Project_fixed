@@ -29,6 +29,11 @@ METRICS = ("f1", "macro_f1", "accuracy", "auc")
 
 
 def load_group(pattern, threshold, preds="best"):
+    if isinstance(pattern, (list, tuple)):
+        dirs = sorted({d for p in pattern for d in glob.glob(p)})
+        if not dirs:
+            raise SystemExit(f"no runs match {pattern}")
+        return [r for d in dirs for r in load_group(d, threshold, preds)]
     """preds="best": the checkpoint selected on validation (test_preds.npz); "final": the model at the
     last epoch (test_preds_final.npz, threshold 0.5 when a threshold is needed)."""
     fname = "test_preds.npz" if preds == "best" else "test_preds_final.npz"
@@ -185,8 +190,8 @@ def group_metric(group, metric, sample_idx=None):
 
 def main(argv=None):
     ap = argparse.ArgumentParser()
-    ap.add_argument("--a", required=True, help="glob of run dirs (group A, e.g. hybrid seeds)")
-    ap.add_argument("--b", required=True, help="glob of run dirs (group B, e.g. baseline seeds)")
+    ap.add_argument("--a", required=True, nargs="+", help="glob(s) or run dirs of group A, e.g. hybrid seeds")
+    ap.add_argument("--b", required=True, nargs="+", help="glob(s) or run dirs of group B, e.g. baseline seeds")
     ap.add_argument("--threshold", default="tuned")
     ap.add_argument("--metric", choices=METRICS, default="f1",
                     help="f1 = positive-class F1 (binary only); auc = ROC-AUC of P(y=1) (binary only, threshold-free; "

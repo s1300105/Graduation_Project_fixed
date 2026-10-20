@@ -11,7 +11,9 @@ Resumable: a (dataset, arm, seed) whose run directory already holds metrics.json
 the same command continues an interrupted grid. Data are prepared on first use
 (data/scripts/make_molnet_json.py, then run.py --molgraph) under <root>/<dataset>/.
 Writes <root>/summary.json and <root>/summary.md (per-arm mean +/- sd of test ROC-AUC at the
-best-validation epoch and at the final epoch, plus the paired / two-level bootstrap contrasts).
+best-validation epoch and at the final epoch, plus the paired and two-level bootstrap contrasts,
+with the registered decision of docs/CHEM_PROTOCOL_ja.md amendment 1: Holm over the primary
+contrasts, two-level bootstrap, 'best' predictions).
 """
 import argparse
 import json
@@ -40,9 +42,34 @@ ARMS = {
 ARM_LABELS = {"ecfp_rf": "A0 ECFP4+RF", "codebert": "A1 text only", "graph_only": "A2 graph only",
               "graph_only-no_edges": "A2e graph, no edges", "hybrid": "A3 hybrid",
               "hybrid-shuffle_edges": "A3s hybrid, shuffled edges", "hybrid-no_edges": "A3e hybrid, no edges"}
-CONTRASTS = [("hybrid", "codebert"), ("hybrid", "hybrid-no_edges"), ("hybrid", "hybrid-shuffle_edges"),
-             ("graph_only", "graph_only-no_edges"), ("hybrid", "ecfp_rf"), ("codebert", "ecfp_rf"),
-             ("hybrid", "graph_only")]
+# (a, b, role): primary = the registered decision (Holm over 2 contrasts x datasets, 'best' predictions);
+# secondary = registered but not used for the decision; exploratory = not registered (amendment 1)
+CONTRASTS = [("hybrid", "codebert", "primary"), ("hybrid", "hybrid-no_edges", "primary"),
+             ("hybrid", "hybrid-shuffle_edges", "secondary"), ("graph_only", "graph_only-no_edges", "secondary"),
+             ("hybrid", "ecfp_rf", "secondary"), ("codebert", "ecfp_rf", "exploratory"),
+             ("hybrid", "graph_only", "exploratory")]
+
+
+def _parse_ab(stdout):
+    import re
+    line = next((l for l in stdout.splitlines() if l.startswith("A - B")), None)
+    if line is None:
+        return None
+    m = re.search(r"A - B: ([+-][\d.]+)\s+95% .*CI \[([+-][\d.]+), ([+-][\d.]+)\]\s+P\(A>B\)=([\d.]+)", line)
+    if not m:
+        return {"line": line}
+    d, lo, hi, p = map(float, m.groups())
+    return {"line": line, "diff": d, "lo": lo, "hi": hi, "p_a_gt_b": p, "p_two_sided": min(1.0, 2 * min(p, 1 - p)),
+            "half_width": (hi - lo) / 2}
+
+
+def holm(pvals):
+    order = sorted(range(len(pvals)), key=lambda i: pvals[i])
+    adj, running = [0.0] * len(pvals), 0.0
+    for rank, i in enumerate(order):
+        running = max(running, min(1.0, (len(pvals) - rank) * pvals[i]))
+        adj[i] = running
+    return adj
 
 
 def run_dir_name(ds, arm, seed):
@@ -115,27 +142,45 @@ def summarise(root: Path, datasets, seeds):
                 arms[arm] = {"runs": vals, "test_auc": ms("test_auc"), "final_test_auc": ms("final_test_auc"),
                              "test_pr_auc": ms("test_pr_auc"), "val_auc": ms("val_auc")}
         contrasts = []
-        for a, b in CONTRASTS:
+        for a, b, role in CONTRASTS:
             if a not in arms or b not in arms:
                 continue
+            # exactly the seeds of the table (a glob over seed* would pick up every seed on disk)
+            da = [str(runs / run_dir_name(ds, a, k)) for k in seeds if (runs / run_dir_name(ds, a, k) / "metrics.json").exists()]
+            db = [str(runs / run_dir_name(ds, b, k)) for k in seeds if (runs / run_dir_name(ds, b, k) / "metrics.json").exists()]
             for preds in ("best", "final"):
-                ga = str(runs / (run_dir_name(ds, a, 0).replace("seed0", "seed*")))
-                gb = str(runs / (run_dir_name(ds, b, 0).replace("seed0", "seed*")))
-                r = subprocess.run([PY, str(ROOT / "scripts/compare_runs.py"), "--a", ga, "--b", gb, "--metric", "auc",
-                                    "--preds", preds, "--seed_bootstrap", "--n_boot", "2000"],
-                                   cwd=ROOT, capture_output=True, text=True)
-                line = next((l for l in r.stdout.splitlines() if l.startswith("A - B")), r.stderr.strip()[-300:])
-                contrasts.append({"a": a, "b": b, "preds": preds, "result": line})
+                for kind, flag in (("two_level", ["--seed_bootstrap"]), ("paired_items", [])):
+                    r = subprocess.run([PY, str(ROOT / "scripts/compare_runs.py"), "--a", *da, "--b", *db, "--metric", "auc",
+                                        "--preds", preds, "--n_boot", "2000", *flag], cwd=ROOT, capture_output=True, text=True)
+                    res = _parse_ab(r.stdout) or {"line": r.stderr.strip()[-300:]}
+                    contrasts.append({"a": a, "b": b, "role": role, "preds": preds, "statistic": kind,
+                                      "n_a": len(da), "n_b": len(db), **res})
         out["datasets"][ds] = {"arms": arms, "contrasts": contrasts}
+    # Holm over the primary tests of all summarised datasets (two-level bootstrap, 'best' predictions)
+    prim = [c for d in out["datasets"].values() for c in d["contrasts"]
+            if c["role"] == "primary" and c["preds"] == "best" and c["statistic"] == "two_level" and "p_two_sided" in c]
+    for c, p in zip(prim, holm([c["p_two_sided"] for c in prim])):
+        c["p_holm"] = p
+        c["decision"] = "positive" if (c["diff"] > 0 and p < 0.05) else ("negative" if (c["diff"] < 0 and p < 0.05) else "no difference shown")
         md += [f"## {ds}", "", "| arm | n | test ROC-AUC (best) | test ROC-AUC (final) | test PR-AUC | val ROC-AUC |",
                "|---|---|---|---|---|---|"]
         f = lambda t: "-" if t is None else f"{t[0]:.3f} +/- {t[1]:.3f}"
         for arm, v in arms.items():
             md.append(f"| {ARM_LABELS.get(arm, arm)} | {v['test_auc'][2] if v['test_auc'] else 0} | {f(v['test_auc'])} | "
                       f"{f(v['final_test_auc'])} | {f(v['test_pr_auc'])} | {f(v['val_auc'])} |")
-        md += ["", "Contrasts (two-level bootstrap over seeds x test molecules, 2000 resamples):", ""]
-        for c in contrasts:
-            md.append(f"- {ARM_LABELS.get(c['a'], c['a'])} vs {ARM_LABELS.get(c['b'], c['b'])} ({c['preds']}): `{c['result']}`")
+        md.append("")
+    for ds, dd in out["datasets"].items():
+        md += [f"### {ds}: contrasts (ROC-AUC, A - B; 2000 resamples)", "",
+               "| role | A - B | preds | statistic | n runs | diff | 95% CI | half-width | P(A>B) | p two-sided | p Holm | decision |",
+               "|---|---|---|---|---|---|---|---|---|---|---|---|"]
+        for c in dd["contrasts"]:
+            if "diff" not in c:
+                md.append(f"| {c['role']} | {c['a']} - {c['b']} | {c['preds']} | {c['statistic']} | | | `{c['line']}` | | | | | |")
+                continue
+            md.append(f"| {c['role']} | {ARM_LABELS.get(c['a'], c['a'])} - {ARM_LABELS.get(c['b'], c['b'])} | {c['preds']} | "
+                      f"{c['statistic']} | {c['n_a']}/{c['n_b']} | {c['diff']:+.4f} | [{c['lo']:+.4f}, {c['hi']:+.4f}] | "
+                      f"{c['half_width']:.4f} | {c['p_a_gt_b']:.3f} | {c['p_two_sided']:.3f} | "
+                      f"{(format(c['p_holm'], '.3f') if 'p_holm' in c else '-')} | {c.get('decision', '-')} |")
         md.append("")
     (root / "summary.json").write_text(json.dumps(out, indent=1))
     (root / "summary.md").write_text("\n".join(md) + "\n")

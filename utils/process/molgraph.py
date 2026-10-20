@@ -16,6 +16,11 @@ graph of the same molecule:
   gets self loops of relation 0, as the code graphs do.
 
 Nothing here is learned or random: the same SMILES always yields the same graph.
+
+The vocabularies and accessors are OGB's. Built from a canonical SMILES (as the pipeline does), the
+chirality tag CW / CCW is relative to RDKit's neighbour order of THAT string, so it can be the
+opposite of OGB's shipped node features for re-ordered stereocentres (BBBP 455, BACE 277 molecules);
+all other atom features and every bond type equal OGB's.
 """
 from __future__ import annotations
 
