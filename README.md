@@ -80,6 +80,10 @@ python scripts/compare_runs.py --a "runs/hybrid_bs16_lr1.0e-04_br0.30_seed*" --b
 
 # 6. 既存 run の再評価
 python run.py --mode test --run_dir runs/hybrid_bs16_lr1.0e-04_br0.30_seed0
+
+# 7. 長さ別の確認: テキスト枝の窓（512 トークン）の外に欠陥がある関数を取りこぼしているか（RUNBOOK §13）
+python scripts/length_strata.py --group codebert "runs/codebert_bs16_lr1.0e-04_br0.30_seed*" \
+    --group hybrid "runs/hybrid_bs16_lr1.0e-04_br0.30_seed*" --bigvul_csv data/raw/MSR_data_cleaned.csv --out runs/length_strata
 ```
 
 ### 化学（SMILES ＋ 分子グラフ。詳細は `docs/CHEM_PROTOCOL_ja.md` と RUNBOOK §12）

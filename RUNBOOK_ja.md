@@ -249,3 +249,26 @@ python scripts/compare_runs.py --metric auc --seed_bootstrap --a "runs_hiv/hiv_h
 - `--model_type codebert` は「テキストのみ」の腕の名前で、中身は manifest の `text_model`（ChemBERTa）になる。
 - MoLFormer（`ibm-research/MoLFormer-XL-both-10pct`）で感度を見る場合は `--text_model ibm-research/MoLFormer-XL-both-10pct --trust_remote_code --max_length 202` を付ける。事前学習が立体情報なしの SMILES なので、`make_molnet_json.py` の出力の立体情報を落とすかどうかを先に決める（BACE では立体異性体でラベルが違うものがある）。
 - HIV の時間の目安: CPU 4 コアでは 77M のテキスト枝つきの腕が 1 seed・30 エポックで約 4 時間。GPU なら数分〜十数分の見込み（未計測）。
+
+## 13. 長さ別の確認: テキスト枝の窓の外にある欠陥を取りこぼしているか
+
+新しい構造（LM が 512 トークンずつ読み、グラフが塊どうしをデータフロー・制御フローでつなぐ）に余地があるかを、手元の run の予測だけで先に確かめる。学習はしない（数分。大半は CSV の読み込み）。
+
+```bash
+python scripts/length_strata.py \
+    --group codebert       "runs/codebert_bs16_lr1.0e-04_br0.30_seed*" \
+    --group hybrid         "runs/hybrid_bs16_lr1.0e-04_br0.30_seed*" \
+    --group hybrid-shuffle "runs/hybrid-shuffle_edges_bs16_lr1.0e-04_br0.30_seed*" \
+    --group graph_only     "runs/graph_only_bs16_lr1.0e-04_br0.30_seed*" \
+    --bigvul_csv data/raw/MSR_data_cleaned.csv --out runs/length_strata
+cat runs/length_strata/summary.md
+```
+
+- 終わった run（`test_preds.npz` のある run）だけを使う。キューの途中でも、今ある run で先に見られる（codebert がまだなら hybrid 系と graph_only だけでもよい）。出力は `summary.md` / `summary.json` / `items.csv`（関数ごとのトークン数・分類・グループごとの平均確率）。
+- 窓 W は run の `args.json` の text_model と max_length から決まる（CodeBERT・512 なら本文 510 トークン）。テキストは run が読んだテスト JSONL をそのまま、学習時と同じトークナイザで数える。
+- `--bigvul_csv` は `make_bigvul_json.py` に渡したのと同じ CSV。脆弱な関数ごとに、修正で消えた・書き換えられた行（`func_before` と `func_after` の行の差分、空白の違いは無視）が窓の中か外かを判定する。行の位置は `make_bigvul_json.py` と同じ整形（空行・コメント・行頭空白の除去）を通して、モデルが読んだテキスト上のトークン位置で数える。追加だけの修正（チェックの追加）は、追加位置の直後の行で判定し、`insert:` を付けて別に数える。位置が決められない関数は `unknown:<理由>` として数え、黙って落とさない。
+- **見るところ**は「Hidden vs visible flaws」の表。窓を超える関数のうち、欠陥が窓の外にある脆弱な関数（hidden）と窓の中にある関数（visible）について、窓を超える非脆弱な関数との AUC を比べる。hidden の AUC が明らかに低ければ、窓の外を読む構造に余地がある。同じくらいなら、モデルは欠陥そのものではなく長さや書き方で当てている（その場合、BigVul では新構造の差が出にくい）。窓を超える層の length-only AUC（長さだけで当てた AUC）も並べて見る。
+- hybrid と graph_only はグラフで窓の外も見ている。hidden の AUC が codebert より hybrid で高ければ、今のグラフがすでに窓の外を補っている兆し。
+- hidden の件数が少ないと区間が広い。件数（n）を必ず一緒に見る。区間はテスト項目の再標本化で、run（seed）は固定。
+- 欠陥が窓の外にあるには関数が長い必要があるので、hidden の群は visible より長くなりやすい。モデルが長さで当てていると hidden の AUC が高めに出て、「差がない」側に寄る。各表の下の length-only AUC（visible / hidden）で、その寄りの大きさを見る。
+- 古い run で `args.json` に `test_jsonl` が無いときは `--test_jsonl data/cleaned_data/bigvul_test.jsonl` を付ける（repo の根で実行する）。
