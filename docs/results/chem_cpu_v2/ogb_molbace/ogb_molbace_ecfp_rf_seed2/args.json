@@ -1,0 +1,7 @@
+{
+ "model": "ECFP4(2048)+RandomForest",
+ "n_estimators": 500,
+ "seed": 2,
+ "dataset": "ogb_molbace",
+ "data_root": "/home/user/Graduation_Project_fixed/experiments/chem_v2/ogb_molbace"
+}
