@@ -31,10 +31,27 @@ from utils.functions.cpg import NUM_NODE_LABELS
 CODEBERT = "microsoft/codebert-base"
 
 
+def load_text_encoder(model_name: str, trust_remote_code: bool = False):
+    """AutoModel for the text branch. Models with custom code (MoLFormer) need
+    trust_remote_code=True; MoLFormer additionally redraws its random attention
+    features on every forward unless deterministic_eval=True, which would make
+    evaluation stochastic, and its 'pooler' is a function, not a module."""
+    if not trust_remote_code:
+        return AutoModel.from_pretrained(model_name)
+    kw = {"trust_remote_code": True}
+    if "molformer" in model_name.lower():
+        kw.update({"deterministic_eval": True, "add_pooling_layer": False})
+    return AutoModel.from_pretrained(model_name, **kw)
+
+
 class CodeBERTEncoder(nn.Module):
-    def __init__(self, model_name: str = CODEBERT, tune_last_n_layers: int = 2):
+    """Pretrained transformer encoder with only its last N layers trainable
+    (CodeBERT for code; any RoBERTa-style model with ``encoder.layer``, e.g. a
+    chemical LM for SMILES)."""
+
+    def __init__(self, model_name: str = CODEBERT, tune_last_n_layers: int = 2, trust_remote_code: bool = False):
         super().__init__()
-        self.bert = AutoModel.from_pretrained(model_name)
+        self.bert = load_text_encoder(model_name, trust_remote_code)
         self.hidden_size = self.bert.config.hidden_size
         for p in self.bert.parameters():
             p.requires_grad = False
@@ -43,7 +60,7 @@ class CodeBERTEncoder(nn.Module):
                 for p in layer.parameters():
                     p.requires_grad = True
         # the pooler is never used (we read last_hidden_state[:, 0]); keep it frozen
-        if getattr(self.bert, "pooler", None) is not None:
+        if isinstance(getattr(self.bert, "pooler", None), nn.Module):
             for p in self.bert.pooler.parameters():
                 p.requires_grad = False
 
@@ -96,7 +113,7 @@ class BertRGCN(nn.Module):
                  use_gate: bool = True, gate_temperature: float = 1.0, cls_skip: bool = True,
                  graph_only: bool = False, shuffle_edges: bool = False, tune_last_n_layers: int = 2,
                  max_length: int = 512, model_name: str = CODEBERT, device=None, seed: int = 0,
-                 num_classes: int = 2):
+                 num_classes: int = 2, drop_edges: bool = False, trust_remote_code: bool = False):
         super().__init__()
         self.device = device or torch.device("cpu")
         self.hidden_dim = hidden_dim
@@ -104,6 +121,7 @@ class BertRGCN(nn.Module):
         self.graph_only = graph_only
         self.cls_skip = cls_skip and not graph_only
         self.shuffle_edges = shuffle_edges
+        self.drop_edges = drop_edges        # edgeless control: R-GCN keeps only its self (root) transform
         self.shuffle_seed = int(seed)
         self.max_length = max_length
         self.rgcn_residual = rgcn_residual
@@ -111,8 +129,9 @@ class BertRGCN(nn.Module):
 
         # --- text branch ---
         if not graph_only:
-            self.func_tokenizer = AutoTokenizer.from_pretrained(model_name)
-            self.func_encoder = CodeBERTEncoder(model_name=model_name, tune_last_n_layers=tune_last_n_layers)
+            self.func_tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+            self.func_encoder = CodeBERTEncoder(model_name=model_name, tune_last_n_layers=tune_last_n_layers,
+                                                trust_remote_code=trust_remote_code)
             code_dim = self.func_encoder.hidden_size
         else:
             self.func_tokenizer = None
@@ -167,6 +186,9 @@ class BertRGCN(nn.Module):
             x = torch.cat([x, self.label_emb(labels)], dim=-1)
         h = self.input_proj(x)
         edge_index, edge_type = data.edge_index, data.edge_type
+        if self.drop_edges:
+            edge_index = edge_index[:, :0]
+            edge_type = edge_type[:0]
         if self.shuffle_edges:
             gids = getattr(data, "idx", None)
             if gids is not None and not torch.is_tensor(gids):
@@ -206,13 +228,14 @@ class CodeBERTOnly(nn.Module):
     """Baseline: fine-tuned CodeBERT CLS -> MLP (identical text recipe)."""
 
     def __init__(self, device=None, tune_last_n_layers: int = 2, max_length: int = 512,
-                 hidden_dim: int = 200, model_name: str = CODEBERT, num_classes: int = 2):
+                 hidden_dim: int = 200, model_name: str = CODEBERT, num_classes: int = 2, trust_remote_code: bool = False):
         super().__init__()
         self.device = device or torch.device("cpu")
         self.max_length = max_length
         self.num_classes = int(num_classes)
-        self.func_tokenizer = AutoTokenizer.from_pretrained(model_name)
-        self.func_encoder = CodeBERTEncoder(model_name=model_name, tune_last_n_layers=tune_last_n_layers)
+        self.func_tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=trust_remote_code)
+        self.func_encoder = CodeBERTEncoder(model_name=model_name, tune_last_n_layers=tune_last_n_layers,
+                                            trust_remote_code=trust_remote_code)
         self.classifier = nn.Sequential(
             nn.Linear(self.func_encoder.hidden_size, hidden_dim), nn.ReLU(), nn.Dropout(0.2),
             nn.Linear(hidden_dim, self.num_classes),
@@ -232,7 +255,7 @@ class CodeBERTOnly(nn.Module):
         return self.classifier(cls)
 
 
-ABLATIONS = ("none", "no_gate", "no_cls_skip", "shuffle_edges", "no_input_norm", "no_residual")
+ABLATIONS = ("none", "no_gate", "no_cls_skip", "shuffle_edges", "no_input_norm", "no_residual", "no_edges")
 
 
 def build_model(model_type: str, device, *, num_relations: int = 3, node_feat_dim: int = 768,
@@ -240,10 +263,12 @@ def build_model(model_type: str, device, *, num_relations: int = 3, node_feat_di
                 tune_last_n_layers: int = 2, max_length: int = 512, ablation: str = "none",
                 gate_temperature: float = 1.0, rgcn_residual: bool = True, input_norm: bool = True,
                 use_node_labels: bool = True, seed: int = 0, num_classes: int = 2,
-                model_name: str = CODEBERT, num_node_labels: int = NUM_NODE_LABELS):
+                model_name: str = CODEBERT, num_node_labels: int = NUM_NODE_LABELS,
+                trust_remote_code: bool = False):
     """model_type: hybrid | codebert | graph_only ("codebert" = the text-only arm, whatever
     ``model_name`` is: CodeBERT for code, a chemical LM for SMILES, ...).
-    ablation: none | no_gate | no_cls_skip | shuffle_edges | no_input_norm | no_residual
+    ablation: none | no_gate | no_cls_skip | shuffle_edges | no_input_norm | no_residual | no_edges
+    (no_edges: the R-GCN sees no edge at all, only per-node transforms -- the structure-free control)
     (no_gate / no_cls_skip need the fusion, i.e. the hybrid; codebert takes none).
     num_classes: width of the classifier's last layer (2 = BigVul-style binary,
     softmax P(y=1) is reported; C > 2 = multi-class, argmax is reported)."""
@@ -255,12 +280,14 @@ def build_model(model_type: str, device, *, num_relations: int = 3, node_feat_di
         if ablation != "none":
             raise ValueError("ablations apply to hybrid / graph_only only; the CodeBERT baseline has no graph branch")
         return CodeBERTOnly(device=device, tune_last_n_layers=tune_last_n_layers, max_length=max_length,
-                            hidden_dim=hidden_dim, num_classes=num_classes, model_name=model_name).to(device)
+                            hidden_dim=hidden_dim, num_classes=num_classes, model_name=model_name,
+                            trust_remote_code=trust_remote_code).to(device)
     kw = dict(node_feat_dim=node_feat_dim, hidden_dim=hidden_dim, num_rgcn_layers=num_rgcn_layers,
               num_relations=num_relations, fusion_layers=fusion_layers, tune_last_n_layers=tune_last_n_layers,
               max_length=max_length, device=device, gate_temperature=gate_temperature,
               rgcn_residual=rgcn_residual, input_norm=input_norm, use_node_labels=use_node_labels, seed=seed,
-              num_classes=num_classes, model_name=model_name, num_node_labels=num_node_labels)
+              num_classes=num_classes, model_name=model_name, num_node_labels=num_node_labels,
+              trust_remote_code=trust_remote_code)
     if model_type == "graph_only":
         if ablation in ("no_gate", "no_cls_skip"):
             raise ValueError(f"ablation {ablation} needs the fusion module; graph_only has none")
@@ -277,4 +304,6 @@ def build_model(model_type: str, device, *, num_relations: int = 3, node_feat_di
         kw["input_norm"] = False
     elif ablation == "no_residual":
         kw["rgcn_residual"] = False
+    elif ablation == "no_edges":
+        kw["drop_edges"] = True
     return BertRGCN(**kw).to(device)

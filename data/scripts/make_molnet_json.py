@@ -4,12 +4,15 @@ The chemistry instance of the task suite: the text branch reads the SMILES strin
 language model and the graph branch reads the molecular graph built from the same SMILES
 (utils/process/molgraph.py; run.py --molgraph turns these jsonl files into the model inputs).
 
-Datasets (single binary task each):
+Datasets (single binary task each; the ogb_* variants carry OGB's shipped scaffold split, which is
+the Hu et al. split, and keep every OGB row except SMILES the installed RDKit cannot parse):
   bbbp         MoleculeNet BBBP.csv            label p_np        (blood-brain barrier penetration)
   bace         MoleculeNet bace.csv            label Class       (BACE-1 inhibition), SMILES column mol
   clintox_tox  MoleculeNet clintox.csv.gz      label CT_TOX      (failed clinical trials for toxicity)
   hiv          MoleculeNet HIV.csv             label HIV_active  (HIV replication inhibition)
-  ogb_molhiv   OGB ogbg-molhiv (hiv.zip)       label HIV_active, OGB's official scaffold split kept
+  ogb_molhiv   OGB ogbg-molhiv (hiv.zip)       label HIV_active
+  ogb_molbbbp  OGB ogbg-molbbbp (bbbp.zip)     label p_np
+  ogb_molbace  OGB ogbg-molbace (bace.zip)     label Class
 
 Steps: read -> RDKit parse (unparsable rows dropped and counted) -> canonical SMILES (the text the
 LM reads and the graph is built from; the original string is kept as source_id when it differs)
@@ -58,6 +61,10 @@ SOURCES = {
     "hiv": {"url": S3 + "HIV.csv", "file": "HIV.csv", "smiles": "smiles", "label": "HIV_active"},
     "ogb_molhiv": {"url": "http://snap.stanford.edu/ogb/data/graphproppred/csv_mol_download/hiv.zip",
                    "file": "hiv.zip", "smiles": "smiles", "label": "HIV_active"},
+    "ogb_molbbbp": {"url": "http://snap.stanford.edu/ogb/data/graphproppred/csv_mol_download/bbbp.zip",
+                    "file": "bbbp.zip", "smiles": "smiles", "label": "p_np"},
+    "ogb_molbace": {"url": "http://snap.stanford.edu/ogb/data/graphproppred/csv_mol_download/bace.zip",
+                    "file": "bace.zip", "smiles": "smiles", "label": None},     # label column read from the file
 }
 
 
@@ -86,7 +93,7 @@ def read_source(name: str, path: Path):
     """-> (DataFrame[smiles_raw, target, source_id], official split Series or None)."""
     src = SOURCES[name]
     official = None
-    if name == "ogb_molhiv":
+    if name.startswith("ogb_"):
         with zipfile.ZipFile(path) as z:
             names = z.namelist()
             mol = next(n for n in names if n.endswith("mapping/mol.csv.gz"))
@@ -99,7 +106,8 @@ def read_source(name: str, path: Path):
         official = part
     else:
         df = pd.read_csv(path, compression="gzip" if str(path).endswith(".gz") else None)
-    out = pd.DataFrame({"smiles_raw": df[src["smiles"]].astype(str), "target": df[src["label"]]})
+    label = src["label"] or next(c for c in df.columns if c not in ("smiles", "mol_id"))
+    out = pd.DataFrame({"smiles_raw": df[src["smiles"]].astype(str), "target": df[label]})
     out["source_id"] = [f"{name}:{i}" for i in range(len(out))]
     return out, official
 
@@ -139,6 +147,9 @@ def parse_args(argv=None):
     p.add_argument("--out_dir", required=True)
     p.add_argument("--split", choices=["scaffold", "random", "ogb"], default=None,
                    help="default: ogb for ogb_molhiv, scaffold otherwise")
+    p.add_argument("--dedup", choices=["canonical", "none"], default=None,
+                   help="canonical: drop label-conflicting duplicate groups and keep the first row of the others "
+                        "(default for own splits); none: keep every row (default for ogb_*, to match OGB / Hu et al.)")
     p.add_argument("--fractions", default="0.8,0.1,0.1")
     p.add_argument("--seed", type=int, default=42, help="random split only (the scaffold split is deterministic)")
     return p.parse_args(argv)
@@ -147,9 +158,11 @@ def parse_args(argv=None):
 def main(argv=None) -> dict:
     args = parse_args(argv)
     Chem, _ = _chem()
-    split = args.split or ("ogb" if args.dataset == "ogb_molhiv" else "scaffold")
-    if split == "ogb" and args.dataset != "ogb_molhiv":
-        raise SystemExit("[prep] FATAL: --split ogb exists only for ogb_molhiv")
+    is_ogb = args.dataset.startswith("ogb_")
+    split = args.split or ("ogb" if is_ogb else "scaffold")
+    if split == "ogb" and not is_ogb:
+        raise SystemExit("[prep] FATAL: --split ogb exists only for the ogb_* datasets")
+    dedup = args.dedup or ("none" if is_ogb else "canonical")
     inp = Path(args.input)
     path = download(args.dataset, inp) if args.download else inp / SOURCES[args.dataset]["file"]
     if not path.exists():
@@ -179,16 +192,26 @@ def main(argv=None) -> dict:
     step("drop SMILES RDKit cannot parse", n0, len(df))
     n0 = len(df)
     df["dedup_key"] = df["func"]
+    nun = df.groupby("dedup_key")["target"].nunique()
+    vc = df["dedup_key"].value_counts()
+    stats["duplicate_groups"] = {"groups": int((vc > 1).sum()), "rows_in_groups": int(vc[vc > 1].sum()),
+                                 "label_conflicting_groups": int((nun > 1).sum())}
     if official is not None:
+        nparts = df.groupby("dedup_key")["partition"].nunique()
+        stats["duplicate_groups"]["groups_crossing_official_splits"] = int((nparts > 1).sum())
+    if dedup == "none":
+        stats["dedup"] = {"mode": "none"}
+    elif official is not None:
         # keep OGB's assignment; a duplicate in two official splits keeps the later split (test wins)
         rank = df["partition"].map({"train": 0, "valid": 1, "test": 2})
         df = df.assign(_r=rank).sort_values("_r", kind="mergesort", ascending=False)
         df, dstats = prep.dedup_by_key(df)
         df = df.sort_index().drop(columns="_r")
+        stats["dedup"] = dstats
     else:
         df, dstats = prep.dedup_by_key(df)
-    stats["dedup"] = dstats
-    step("dedup canonical SMILES (conflicts dropped)", n0, len(df))
+        stats["dedup"] = dstats
+    step("dedup canonical SMILES (conflicts dropped)" if dedup != "none" else "no dedup (duplicates kept)", n0, len(df))
     df = df.reset_index(drop=True)
     df["idx"] = range(len(df))          # order of the source file after filtering: stable for given options
     if split == "scaffold":

@@ -12,3 +12,4 @@ pytest>=7
 # dataset preparation scripts (data/scripts/make_{poj104,codenet,devign}_json.py)
 pyarrow>=14
 huggingface_hub>=0.20
+rdkit>=2024.3       # chemistry datasets (data/scripts/make_molnet_json.py, run.py --molgraph); the reported runs used 2026.09.1

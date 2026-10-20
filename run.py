@@ -526,7 +526,8 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
                         fusion_layers=args.fusion_layers, tune_last_n_layers=args.tune_last_n_layers,
                         max_length=args.max_length, ablation=args.ablation,
                         gate_temperature=args.gate_temperature, seed=seed, num_classes=num_classes,
-                        model_name=text_model, num_node_labels=num_node_labels)
+                        model_name=text_model, num_node_labels=num_node_labels,
+                        trust_remote_code=bool(getattr(args, "trust_remote_code", False)))
     n_new = sum(p.numel() for n, p in model.named_parameters() if "func_encoder" not in n)
     n_train = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -623,8 +624,19 @@ def train_run(args, device, *, batch_size, lr, ratio, seed, num_relations, node_
                 break
 
     plot_curves(run_dir)
+    # the model at the LAST epoch, evaluated before best.pth is restored: a selection-free reference
+    # (validation can be a poor proxy for test, e.g. under a scaffold split's label shift)
+    fp, fl, fi, floss = predict(model, test_loader, device)
+    np.savez(run_dir / "test_preds_final.npz", probs=fp, labels=fl, idx=fi)
+    final_block = {"epoch": epoch, "test_loss": floss}
+    if fp.ndim == 1:
+        final_block["test_auc"], final_block["test_pr_auc"] = binary_auc(fp, fl)
+        final_block["test_05"] = metrics_at(fp, fl, 0.5)
+    else:
+        final_block["test_argmax"] = metrics_multiclass(fp, fl)
     model.load_state_dict(torch.load(run_dir / "best.pth", map_location=device))
     result = evaluate_run(model, run_dir, val_loader, test_loader, device)
+    result["final_epoch"] = final_block
     # best_val_selection_f1 keeps its (frozen) name; it holds the value of the metric named here
     sel_metric = ("roc_auc" if args.select_on == "auc" else
                   "accuracy" if args.select_on == "accuracy" else
@@ -1163,10 +1175,15 @@ def build_parser():
     p.add_argument("--num_relations", type=int, default=3, help="used only when input/manifest.json is absent")
     # model
     p.add_argument("--model_type", choices=["hybrid", "codebert", "graph_only"], default="hybrid")
-    p.add_argument("--ablation", choices=["none", "no_gate", "no_cls_skip", "shuffle_edges", "no_input_norm", "no_residual"], default="none")
+    p.add_argument("--ablation", choices=["none", "no_gate", "no_cls_skip", "shuffle_edges", "no_input_norm", "no_residual",
+                                          "no_edges"], default="none",
+                   help="no_edges = the structure-free control: the R-GCN keeps only per-node transforms")
     p.add_argument("--text_model", default=None,
                    help="HF id of the text-branch encoder (default: input/manifest.json's text_model, else "
                         "microsoft/codebert-base). Recorded in args.json")
+    p.add_argument("--trust_remote_code", action="store_true",
+                   help="load a text model with custom code (MoLFormer); MoLFormer is then loaded with "
+                        "deterministic_eval=True so evaluation is not stochastic")
     p.add_argument("--hidden_dim", type=int, default=200)
     p.add_argument("--rgcn_layers", type=int, default=6)
     p.add_argument("--fusion_layers", type=int, default=3)
@@ -1290,7 +1307,8 @@ def main(argv=None):
                             gate_temperature=a.gate_temperature, seed=meta["seed"],
                             num_classes=int(meta.get("num_classes", 2)),
                             model_name=meta.get("text_model") or CODEBERT,
-                            num_node_labels=int(meta.get("num_node_labels", NUM_NODE_LABELS)))
+                            num_node_labels=int(meta.get("num_node_labels", NUM_NODE_LABELS)),
+                            trust_remote_code=bool(getattr(a, "trust_remote_code", False)))
         model.load_state_dict(torch.load(run_dir / "best.pth", map_location=device))
         input_dir = Path(args.data_root) / "input"
         val_loader, _ = make_loader(input_dir, "valid", batch_size=args.eval_batch_size, shuffle=False, seed=0)

@@ -28,17 +28,22 @@ import numpy as np
 METRICS = ("f1", "macro_f1", "accuracy", "auc")
 
 
-def load_group(pattern, threshold):
+def load_group(pattern, threshold, preds="best"):
+    """preds="best": the checkpoint selected on validation (test_preds.npz); "final": the model at the
+    last epoch (test_preds_final.npz, threshold 0.5 when a threshold is needed)."""
+    fname = "test_preds.npz" if preds == "best" else "test_preds_final.npz"
     runs = []
     for d in sorted(glob.glob(pattern)):
         d = Path(d)
-        if not (d / "test_preds.npz").exists():
+        if not (d / fname).exists():
             continue
-        z = np.load(d / "test_preds.npz")
+        z = np.load(d / fname)
         m = json.loads((d / "metrics.json").read_text())
         probs = z["probs"]
         if probs.ndim == 2:
             t = None                                  # multi-class: argmax, no threshold
+        elif preds == "final":
+            t = 0.5 if threshold == "tuned" else float(threshold)
         else:
             t = m["test_tuned"]["threshold"] if threshold == "tuned" else float(threshold)
         runs.append({"name": d.name, "probs": probs, "labels": z["labels"], "idx": z["idx"], "thr": t})
@@ -186,11 +191,15 @@ def main(argv=None):
     ap.add_argument("--metric", choices=METRICS, default="f1",
                     help="f1 = positive-class F1 (binary only); auc = ROC-AUC of P(y=1) (binary only, threshold-free; "
                          "the MoleculeNet metric); macro_f1 / accuracy work for binary and multi-class runs")
+    ap.add_argument("--preds", choices=["best", "final"], default="best",
+                    help="best = checkpoint selected on validation; final = model at the last epoch")
+    ap.add_argument("--seed_bootstrap", action="store_true",
+                    help="two-level bootstrap: resample the runs (seeds) of each group as well as the test items")
     ap.add_argument("--n_boot", type=int, default=2000)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args(argv)
 
-    A, B = load_group(args.a, args.threshold), load_group(args.b, args.threshold)
+    A, B = load_group(args.a, args.threshold, args.preds), load_group(args.b, args.threshold, args.preds)
     common = align([A, B])
     n = len(common)
     classes = {num_classes_of(r) for r in A + B}
@@ -210,9 +219,15 @@ def main(argv=None):
     diffs = np.empty(args.n_boot)
     for i in range(args.n_boot):
         s = rng.integers(0, n, n)
-        diffs[i] = group_metric(A, args.metric, s)[0] - group_metric(B, args.metric, s)[0]
+        if args.seed_bootstrap:
+            ga = [A[j] for j in rng.integers(0, len(A), len(A))]
+            gb = [B[j] for j in rng.integers(0, len(B), len(B))]
+        else:
+            ga, gb = A, B
+        diffs[i] = group_metric(ga, args.metric, s)[0] - group_metric(gb, args.metric, s)[0]
     lo, hi = np.percentile(diffs, [2.5, 97.5])
-    print(f"A - B: {fa - fb:+.4f}  95% paired-bootstrap CI [{lo:+.4f}, {hi:+.4f}]  P(A>B)={float((diffs > 0).mean()):.3f}")
+    kind = "two-level (seeds x items)" if args.seed_bootstrap else "paired-bootstrap"
+    print(f"A - B: {fa - fb:+.4f}  95% {kind} CI [{lo:+.4f}, {hi:+.4f}]  P(A>B)={float((diffs > 0).mean()):.3f}")
     if lo <= 0 <= hi:
         print("=> the difference is not distinguishable from zero at this sample size / number of seeds")
 
