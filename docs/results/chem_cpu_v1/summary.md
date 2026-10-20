@@ -6,89 +6,89 @@ Protocol: docs/CHEM_PROTOCOL_ja.md. Test ROC-AUC, mean +/- sd over seeds; 'best'
 
 | arm | n | test ROC-AUC (best) | test ROC-AUC (final) | test PR-AUC | val ROC-AUC |
 |---|---|---|---|---|---|
-| A0 ECFP4+RF | 4 | 0.853 +/- 0.004 | 0.853 +/- 0.004 | 0.863 +/- 0.004 | 0.719 +/- 0.004 |
-| A2 graph only | 4 | 0.678 +/- 0.018 | 0.678 +/- 0.018 | 0.656 +/- 0.019 | 0.568 +/- 0.017 |
-| A2e graph, no edges | 4 | 0.626 +/- 0.018 | 0.693 +/- 0.010 | 0.627 +/- 0.015 | 0.582 +/- 0.014 |
-| A1 text only | 4 | 0.748 +/- 0.009 | 0.791 +/- 0.002 | 0.753 +/- 0.010 | 0.750 +/- 0.003 |
-| A3 hybrid | 4 | 0.772 +/- 0.013 | 0.788 +/- 0.014 | 0.792 +/- 0.010 | 0.771 +/- 0.008 |
-| A3e hybrid, no edges | 4 | 0.768 +/- 0.008 | 0.785 +/- 0.016 | 0.789 +/- 0.008 | 0.768 +/- 0.009 |
-| A3s hybrid, shuffled edges | 4 | 0.769 +/- 0.011 | 0.782 +/- 0.017 | 0.791 +/- 0.010 | 0.769 +/- 0.007 |
+| A0 ECFP4+RF | 5 | 0.853 +/- 0.004 | 0.853 +/- 0.004 | 0.863 +/- 0.004 | 0.719 +/- 0.003 |
+| A2 graph only | 5 | 0.680 +/- 0.016 | 0.681 +/- 0.017 | 0.657 +/- 0.017 | 0.568 +/- 0.015 |
+| A2e graph, no edges | 5 | 0.619 +/- 0.021 | 0.692 +/- 0.009 | 0.626 +/- 0.013 | 0.584 +/- 0.013 |
+| A1 text only | 5 | 0.744 +/- 0.012 | 0.785 +/- 0.013 | 0.752 +/- 0.009 | 0.753 +/- 0.009 |
+| A3 hybrid | 5 | 0.773 +/- 0.011 | 0.787 +/- 0.012 | 0.792 +/- 0.009 | 0.770 +/- 0.008 |
+| A3e hybrid, no edges | 5 | 0.769 +/- 0.007 | 0.786 +/- 0.014 | 0.789 +/- 0.007 | 0.767 +/- 0.008 |
+| A3s hybrid, shuffled edges | 5 | 0.770 +/- 0.009 | 0.783 +/- 0.015 | 0.792 +/- 0.009 | 0.768 +/- 0.006 |
 
 ## ogb_molbbbp
 
 | arm | n | test ROC-AUC (best) | test ROC-AUC (final) | test PR-AUC | val ROC-AUC |
 |---|---|---|---|---|---|
-| A0 ECFP4+RF | 3 | 0.679 +/- 0.001 | 0.679 +/- 0.001 | 0.716 +/- 0.004 | 0.959 +/- 0.002 |
-| A2 graph only | 3 | 0.599 +/- 0.006 | 0.595 +/- 0.010 | 0.598 +/- 0.014 | 0.925 +/- 0.002 |
-| A2e graph, no edges | 3 | 0.630 +/- 0.003 | 0.630 +/- 0.003 | 0.668 +/- 0.003 | 0.911 +/- 0.003 |
-| A1 text only | 3 | 0.661 +/- 0.004 | 0.700 +/- 0.005 | 0.706 +/- 0.004 | 0.959 +/- 0.001 |
-| A3 hybrid | 3 | 0.674 +/- 0.007 | 0.706 +/- 0.009 | 0.724 +/- 0.008 | 0.959 +/- 0.002 |
-| A3e hybrid, no edges | 3 | 0.665 +/- 0.025 | 0.716 +/- 0.005 | 0.710 +/- 0.021 | 0.958 +/- 0.001 |
-| A3s hybrid, shuffled edges | 3 | 0.673 +/- 0.011 | 0.719 +/- 0.015 | 0.726 +/- 0.001 | 0.961 +/- 0.002 |
+| A0 ECFP4+RF | 5 | 0.677 +/- 0.004 | 0.677 +/- 0.004 | 0.715 +/- 0.004 | 0.959 +/- 0.001 |
+| A2 graph only | 5 | 0.596 +/- 0.008 | 0.593 +/- 0.009 | 0.601 +/- 0.014 | 0.926 +/- 0.003 |
+| A2e graph, no edges | 5 | 0.629 +/- 0.004 | 0.630 +/- 0.004 | 0.668 +/- 0.006 | 0.911 +/- 0.002 |
+| A1 text only | 4 | 0.667 +/- 0.011 | 0.700 +/- 0.004 | 0.707 +/- 0.004 | 0.958 +/- 0.002 |
+| A3 hybrid | 4 | 0.672 +/- 0.006 | 0.708 +/- 0.009 | 0.723 +/- 0.007 | 0.960 +/- 0.002 |
+| A3e hybrid, no edges | 4 | 0.666 +/- 0.021 | 0.717 +/- 0.004 | 0.712 +/- 0.017 | 0.958 +/- 0.001 |
+| A3s hybrid, shuffled edges | 4 | 0.673 +/- 0.009 | 0.713 +/- 0.017 | 0.725 +/- 0.003 | 0.960 +/- 0.002 |
 
 ### ogb_molbace: contrasts (ROC-AUC, A - B; 2000 resamples)
 
 | role | A - B | preds | statistic | n runs | diff | 95% CI | half-width | P(A>B) | p two-sided | p Holm | decision |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| primary | A3 hybrid - A1 text only | best | two_level | 4/4 | +0.0242 | [-0.0020, +0.0523] | 0.0272 | 0.963 | 0.074 | 0.296 | no difference shown |
-| primary | A3 hybrid - A1 text only | best | paired_items | 4/4 | +0.0242 | [+0.0013, +0.0473] | 0.0230 | 0.982 | 0.036 | - | - |
-| primary | A3 hybrid - A1 text only | final | two_level | 4/4 | -0.0033 | [-0.0267, +0.0192] | 0.0229 | 0.393 | 0.786 | - | - |
-| primary | A3 hybrid - A1 text only | final | paired_items | 4/4 | -0.0033 | [-0.0202, +0.0138] | 0.0170 | 0.347 | 0.694 | - | - |
-| primary | A3 hybrid - A3e hybrid, no edges | best | two_level | 4/4 | +0.0043 | [-0.0142, +0.0225] | 0.0183 | 0.698 | 0.604 | 1.000 | no difference shown |
-| primary | A3 hybrid - A3e hybrid, no edges | best | paired_items | 4/4 | +0.0043 | [-0.0023, +0.0112] | 0.0067 | 0.905 | 0.190 | - | - |
-| primary | A3 hybrid - A3e hybrid, no edges | final | two_level | 4/4 | +0.0027 | [-0.0180, +0.0261] | 0.0221 | 0.591 | 0.818 | - | - |
-| primary | A3 hybrid - A3e hybrid, no edges | final | paired_items | 4/4 | +0.0027 | [-0.0027, +0.0086] | 0.0057 | 0.827 | 0.346 | - | - |
-| secondary | A3 hybrid - A3s hybrid, shuffled edges | best | two_level | 4/4 | +0.0033 | [-0.0152, +0.0221] | 0.0186 | 0.642 | 0.716 | - | - |
-| secondary | A3 hybrid - A3s hybrid, shuffled edges | best | paired_items | 4/4 | +0.0033 | [-0.0024, +0.0099] | 0.0062 | 0.861 | 0.278 | - | - |
-| secondary | A3 hybrid - A3s hybrid, shuffled edges | final | two_level | 4/4 | +0.0057 | [-0.0153, +0.0292] | 0.0222 | 0.690 | 0.620 | - | - |
-| secondary | A3 hybrid - A3s hybrid, shuffled edges | final | paired_items | 4/4 | +0.0057 | [-0.0012, +0.0144] | 0.0078 | 0.939 | 0.122 | - | - |
-| secondary | A2 graph only - A2e graph, no edges | best | two_level | 4/4 | +0.0523 | [-0.0181, +0.1169] | 0.0675 | 0.934 | 0.132 | - | - |
-| secondary | A2 graph only - A2e graph, no edges | best | paired_items | 4/4 | +0.0523 | [-0.0116, +0.1089] | 0.0602 | 0.945 | 0.110 | - | - |
-| secondary | A2 graph only - A2e graph, no edges | final | two_level | 4/4 | -0.0151 | [-0.0964, +0.0613] | 0.0789 | 0.337 | 0.674 | - | - |
-| secondary | A2 graph only - A2e graph, no edges | final | paired_items | 4/4 | -0.0151 | [-0.0940, +0.0619] | 0.0779 | 0.324 | 0.648 | - | - |
-| secondary | A3 hybrid - A0 ECFP4+RF | best | two_level | 4/4 | -0.0809 | [-0.1417, -0.0256] | 0.0580 | 0.003 | 0.006 | - | - |
-| secondary | A3 hybrid - A0 ECFP4+RF | best | paired_items | 4/4 | -0.0809 | [-0.1427, -0.0280] | 0.0573 | 0.002 | 0.004 | - | - |
-| secondary | A3 hybrid - A0 ECFP4+RF | final | two_level | 4/4 | -0.0659 | [-0.1227, -0.0130] | 0.0549 | 0.006 | 0.012 | - | - |
-| secondary | A3 hybrid - A0 ECFP4+RF | final | paired_items | 4/4 | -0.0659 | [-0.1214, -0.0158] | 0.0528 | 0.005 | 0.010 | - | - |
-| exploratory | A1 text only - A0 ECFP4+RF | best | two_level | 4/4 | -0.1051 | [-0.1716, -0.0462] | 0.0627 | 0.000 | 0.000 | - | - |
-| exploratory | A1 text only - A0 ECFP4+RF | best | paired_items | 4/4 | -0.1051 | [-0.1710, -0.0463] | 0.0624 | 0.000 | 0.000 | - | - |
-| exploratory | A1 text only - A0 ECFP4+RF | final | two_level | 4/4 | -0.0626 | [-0.1147, -0.0131] | 0.0508 | 0.005 | 0.010 | - | - |
-| exploratory | A1 text only - A0 ECFP4+RF | final | paired_items | 4/4 | -0.0626 | [-0.1156, -0.0138] | 0.0509 | 0.006 | 0.012 | - | - |
-| exploratory | A3 hybrid - A2 graph only | best | two_level | 4/4 | +0.0945 | [+0.0177, +0.1838] | 0.0830 | 0.989 | 0.022 | - | - |
-| exploratory | A3 hybrid - A2 graph only | best | paired_items | 4/4 | +0.0945 | [+0.0205, +0.1836] | 0.0816 | 0.993 | 0.014 | - | - |
-| exploratory | A3 hybrid - A2 graph only | final | two_level | 4/4 | +0.1096 | [+0.0310, +0.1987] | 0.0838 | 0.995 | 0.010 | - | - |
-| exploratory | A3 hybrid - A2 graph only | final | paired_items | 4/4 | +0.1096 | [+0.0314, +0.1975] | 0.0831 | 0.997 | 0.006 | - | - |
+| primary | A3 hybrid - A1 text only | best | two_level | 5/5 | +0.0287 | [+0.0018, +0.0561] | 0.0271 | 0.984 | 0.032 | 0.128 | no difference shown |
+| primary | A3 hybrid - A1 text only | best | paired_items | 5/5 | +0.0287 | [+0.0054, +0.0518] | 0.0232 | 0.994 | 0.012 | - | - |
+| primary | A3 hybrid - A1 text only | final | two_level | 5/5 | +0.0015 | [-0.0207, +0.0245] | 0.0226 | 0.541 | 0.918 | - | - |
+| primary | A3 hybrid - A1 text only | final | paired_items | 5/5 | +0.0015 | [-0.0143, +0.0167] | 0.0155 | 0.563 | 0.874 | - | - |
+| primary | A3 hybrid - A3e hybrid, no edges | best | two_level | 5/5 | +0.0040 | [-0.0127, +0.0193] | 0.0160 | 0.728 | 0.544 | 1.000 | no difference shown |
+| primary | A3 hybrid - A3e hybrid, no edges | best | paired_items | 5/5 | +0.0040 | [-0.0015, +0.0099] | 0.0057 | 0.930 | 0.140 | - | - |
+| primary | A3 hybrid - A3e hybrid, no edges | final | two_level | 5/5 | +0.0010 | [-0.0176, +0.0199] | 0.0188 | 0.566 | 0.868 | - | - |
+| primary | A3 hybrid - A3e hybrid, no edges | final | paired_items | 5/5 | +0.0010 | [-0.0039, +0.0062] | 0.0050 | 0.658 | 0.684 | - | - |
+| secondary | A3 hybrid - A3s hybrid, shuffled edges | best | two_level | 5/5 | +0.0028 | [-0.0143, +0.0197] | 0.0170 | 0.649 | 0.702 | - | - |
+| secondary | A3 hybrid - A3s hybrid, shuffled edges | best | paired_items | 5/5 | +0.0028 | [-0.0034, +0.0091] | 0.0063 | 0.806 | 0.388 | - | - |
+| secondary | A3 hybrid - A3s hybrid, shuffled edges | final | two_level | 5/5 | +0.0034 | [-0.0146, +0.0245] | 0.0196 | 0.652 | 0.696 | - | - |
+| secondary | A3 hybrid - A3s hybrid, shuffled edges | final | paired_items | 5/5 | +0.0034 | [-0.0032, +0.0111] | 0.0072 | 0.822 | 0.356 | - | - |
+| secondary | A2 graph only - A2e graph, no edges | best | two_level | 5/5 | +0.0605 | [-0.0055, +0.1233] | 0.0644 | 0.965 | 0.070 | - | - |
+| secondary | A2 graph only - A2e graph, no edges | best | paired_items | 5/5 | +0.0605 | [-0.0030, +0.1187] | 0.0609 | 0.970 | 0.060 | - | - |
+| secondary | A2 graph only - A2e graph, no edges | final | two_level | 5/5 | -0.0111 | [-0.0906, +0.0658] | 0.0782 | 0.371 | 0.742 | - | - |
+| secondary | A2 graph only - A2e graph, no edges | final | paired_items | 5/5 | -0.0111 | [-0.0885, +0.0646] | 0.0766 | 0.365 | 0.730 | - | - |
+| secondary | A3 hybrid - A0 ECFP4+RF | best | two_level | 5/5 | -0.0801 | [-0.1410, -0.0243] | 0.0583 | 0.003 | 0.006 | - | - |
+| secondary | A3 hybrid - A0 ECFP4+RF | best | paired_items | 5/5 | -0.0801 | [-0.1424, -0.0263] | 0.0580 | 0.003 | 0.006 | - | - |
+| secondary | A3 hybrid - A0 ECFP4+RF | final | two_level | 5/5 | -0.0663 | [-0.1241, -0.0129] | 0.0556 | 0.005 | 0.010 | - | - |
+| secondary | A3 hybrid - A0 ECFP4+RF | final | paired_items | 5/5 | -0.0663 | [-0.1220, -0.0163] | 0.0529 | 0.005 | 0.010 | - | - |
+| exploratory | A1 text only - A0 ECFP4+RF | best | two_level | 5/5 | -0.1088 | [-0.1755, -0.0470] | 0.0643 | 0.000 | 0.000 | - | - |
+| exploratory | A1 text only - A0 ECFP4+RF | best | paired_items | 5/5 | -0.1088 | [-0.1755, -0.0487] | 0.0634 | 0.000 | 0.000 | - | - |
+| exploratory | A1 text only - A0 ECFP4+RF | final | two_level | 5/5 | -0.0678 | [-0.1245, -0.0146] | 0.0549 | 0.004 | 0.008 | - | - |
+| exploratory | A1 text only - A0 ECFP4+RF | final | paired_items | 5/5 | -0.0678 | [-0.1211, -0.0186] | 0.0513 | 0.004 | 0.008 | - | - |
+| exploratory | A3 hybrid - A2 graph only | best | two_level | 5/5 | +0.0931 | [+0.0139, +0.1768] | 0.0815 | 0.993 | 0.014 | - | - |
+| exploratory | A3 hybrid - A2 graph only | best | paired_items | 5/5 | +0.0931 | [+0.0194, +0.1817] | 0.0811 | 0.993 | 0.014 | - | - |
+| exploratory | A3 hybrid - A2 graph only | final | two_level | 5/5 | +0.1056 | [+0.0265, +0.1906] | 0.0820 | 0.997 | 0.006 | - | - |
+| exploratory | A3 hybrid - A2 graph only | final | paired_items | 5/5 | +0.1056 | [+0.0286, +0.1924] | 0.0819 | 0.996 | 0.008 | - | - |
 
 ### ogb_molbbbp: contrasts (ROC-AUC, A - B; 2000 resamples)
 
 | role | A - B | preds | statistic | n runs | diff | 95% CI | half-width | P(A>B) | p two-sided | p Holm | decision |
 |---|---|---|---|---|---|---|---|---|---|---|---|
-| primary | A3 hybrid - A1 text only | best | two_level | 3/3 | +0.0127 | [-0.0205, +0.0439] | 0.0322 | 0.783 | 0.434 | 1.000 | no difference shown |
-| primary | A3 hybrid - A1 text only | best | paired_items | 3/3 | +0.0127 | [-0.0151, +0.0415] | 0.0283 | 0.811 | 0.378 | - | - |
-| primary | A3 hybrid - A1 text only | final | two_level | 3/3 | +0.0063 | [-0.0435, +0.0538] | 0.0486 | 0.573 | 0.854 | - | - |
-| primary | A3 hybrid - A1 text only | final | paired_items | 3/3 | +0.0063 | [-0.0394, +0.0514] | 0.0454 | 0.581 | 0.838 | - | - |
-| primary | A3 hybrid - A3e hybrid, no edges | best | two_level | 3/3 | +0.0094 | [-0.0231, +0.0434] | 0.0333 | 0.713 | 0.574 | 1.000 | no difference shown |
-| primary | A3 hybrid - A3e hybrid, no edges | best | paired_items | 3/3 | +0.0094 | [-0.0034, +0.0220] | 0.0127 | 0.914 | 0.172 | - | - |
-| primary | A3 hybrid - A3e hybrid, no edges | final | two_level | 3/3 | -0.0102 | [-0.0313, +0.0072] | 0.0192 | 0.121 | 0.242 | - | - |
-| primary | A3 hybrid - A3e hybrid, no edges | final | paired_items | 3/3 | -0.0102 | [-0.0219, +0.0005] | 0.0112 | 0.031 | 0.062 | - | - |
-| secondary | A3 hybrid - A3s hybrid, shuffled edges | best | two_level | 3/3 | +0.0008 | [-0.0214, +0.0223] | 0.0219 | 0.524 | 0.952 | - | - |
-| secondary | A3 hybrid - A3s hybrid, shuffled edges | best | paired_items | 3/3 | +0.0008 | [-0.0073, +0.0093] | 0.0083 | 0.580 | 0.840 | - | - |
-| secondary | A3 hybrid - A3s hybrid, shuffled edges | final | two_level | 3/3 | -0.0131 | [-0.0380, +0.0120] | 0.0250 | 0.133 | 0.266 | - | - |
-| secondary | A3 hybrid - A3s hybrid, shuffled edges | final | paired_items | 3/3 | -0.0131 | [-0.0255, -0.0022] | 0.0116 | 0.008 | 0.016 | - | - |
-| secondary | A2 graph only - A2e graph, no edges | best | two_level | 3/3 | -0.0309 | [-0.0777, +0.0154] | 0.0466 | 0.091 | 0.182 | - | - |
-| secondary | A2 graph only - A2e graph, no edges | best | paired_items | 3/3 | -0.0309 | [-0.0777, +0.0123] | 0.0450 | 0.086 | 0.172 | - | - |
-| secondary | A2 graph only - A2e graph, no edges | final | two_level | 3/3 | -0.0349 | [-0.0832, +0.0131] | 0.0481 | 0.074 | 0.148 | - | - |
-| secondary | A2 graph only - A2e graph, no edges | final | paired_items | 3/3 | -0.0349 | [-0.0830, +0.0105] | 0.0467 | 0.060 | 0.120 | - | - |
-| secondary | A3 hybrid - A0 ECFP4+RF | best | two_level | 3/3 | -0.0048 | [-0.0631, +0.0565] | 0.0598 | 0.425 | 0.850 | - | - |
-| secondary | A3 hybrid - A0 ECFP4+RF | best | paired_items | 3/3 | -0.0048 | [-0.0641, +0.0525] | 0.0583 | 0.435 | 0.870 | - | - |
-| secondary | A3 hybrid - A0 ECFP4+RF | final | two_level | 3/3 | +0.0271 | [-0.0339, +0.0849] | 0.0594 | 0.809 | 0.382 | - | - |
-| secondary | A3 hybrid - A0 ECFP4+RF | final | paired_items | 3/3 | +0.0271 | [-0.0316, +0.0855] | 0.0586 | 0.814 | 0.372 | - | - |
-| exploratory | A1 text only - A0 ECFP4+RF | best | two_level | 3/3 | -0.0175 | [-0.0734, +0.0380] | 0.0557 | 0.264 | 0.528 | - | - |
-| exploratory | A1 text only - A0 ECFP4+RF | best | paired_items | 3/3 | -0.0175 | [-0.0729, +0.0355] | 0.0542 | 0.257 | 0.514 | - | - |
-| exploratory | A1 text only - A0 ECFP4+RF | final | two_level | 3/3 | +0.0208 | [-0.0291, +0.0726] | 0.0508 | 0.803 | 0.394 | - | - |
-| exploratory | A1 text only - A0 ECFP4+RF | final | paired_items | 3/3 | +0.0208 | [-0.0268, +0.0671] | 0.0470 | 0.806 | 0.388 | - | - |
-| exploratory | A3 hybrid - A2 graph only | best | two_level | 3/3 | +0.0753 | [+0.0248, +0.1292] | 0.0522 | 0.999 | 0.002 | - | - |
-| exploratory | A3 hybrid - A2 graph only | best | paired_items | 3/3 | +0.0753 | [+0.0279, +0.1272] | 0.0496 | 1.000 | 0.000 | - | - |
-| exploratory | A3 hybrid - A2 graph only | final | two_level | 3/3 | +0.1113 | [+0.0471, +0.1782] | 0.0655 | 1.000 | 0.000 | - | - |
-| exploratory | A3 hybrid - A2 graph only | final | paired_items | 3/3 | +0.1113 | [+0.0508, +0.1745] | 0.0618 | 1.000 | 0.000 | - | - |
+| primary | A3 hybrid - A1 text only | best | two_level | 4/4 | +0.0056 | [-0.0293, +0.0384] | 0.0338 | 0.621 | 0.758 | 1.000 | no difference shown |
+| primary | A3 hybrid - A1 text only | best | paired_items | 4/4 | +0.0056 | [-0.0227, +0.0347] | 0.0287 | 0.639 | 0.722 | - | - |
+| primary | A3 hybrid - A1 text only | final | two_level | 4/4 | +0.0084 | [-0.0370, +0.0538] | 0.0454 | 0.621 | 0.758 | - | - |
+| primary | A3 hybrid - A1 text only | final | paired_items | 4/4 | +0.0084 | [-0.0342, +0.0526] | 0.0434 | 0.619 | 0.762 | - | - |
+| primary | A3 hybrid - A3e hybrid, no edges | best | two_level | 4/4 | +0.0065 | [-0.0185, +0.0365] | 0.0275 | 0.698 | 0.604 | 1.000 | no difference shown |
+| primary | A3 hybrid - A3e hybrid, no edges | best | paired_items | 4/4 | +0.0065 | [-0.0049, +0.0176] | 0.0112 | 0.864 | 0.272 | - | - |
+| primary | A3 hybrid - A3e hybrid, no edges | final | two_level | 4/4 | -0.0088 | [-0.0274, +0.0071] | 0.0173 | 0.137 | 0.274 | - | - |
+| primary | A3 hybrid - A3e hybrid, no edges | final | paired_items | 4/4 | -0.0088 | [-0.0185, -0.0003] | 0.0091 | 0.021 | 0.042 | - | - |
+| secondary | A3 hybrid - A3s hybrid, shuffled edges | best | two_level | 4/4 | -0.0002 | [-0.0178, +0.0189] | 0.0183 | 0.506 | 0.988 | - | - |
+| secondary | A3 hybrid - A3s hybrid, shuffled edges | best | paired_items | 4/4 | -0.0002 | [-0.0061, +0.0058] | 0.0060 | 0.465 | 0.930 | - | - |
+| secondary | A3 hybrid - A3s hybrid, shuffled edges | final | two_level | 4/4 | -0.0051 | [-0.0287, +0.0179] | 0.0233 | 0.319 | 0.638 | - | - |
+| secondary | A3 hybrid - A3s hybrid, shuffled edges | final | paired_items | 4/4 | -0.0051 | [-0.0137, +0.0032] | 0.0085 | 0.114 | 0.228 | - | - |
+| secondary | A2 graph only - A2e graph, no edges | best | two_level | 5/5 | -0.0335 | [-0.0805, +0.0124] | 0.0464 | 0.076 | 0.152 | - | - |
+| secondary | A2 graph only - A2e graph, no edges | best | paired_items | 5/5 | -0.0335 | [-0.0823, +0.0110] | 0.0466 | 0.078 | 0.156 | - | - |
+| secondary | A2 graph only - A2e graph, no edges | final | two_level | 5/5 | -0.0361 | [-0.0837, +0.0107] | 0.0472 | 0.065 | 0.130 | - | - |
+| secondary | A2 graph only - A2e graph, no edges | final | paired_items | 5/5 | -0.0361 | [-0.0850, +0.0095] | 0.0473 | 0.061 | 0.122 | - | - |
+| secondary | A3 hybrid - A0 ECFP4+RF | best | two_level | 4/5 | -0.0043 | [-0.0638, +0.0529] | 0.0583 | 0.438 | 0.876 | - | - |
+| secondary | A3 hybrid - A0 ECFP4+RF | best | paired_items | 4/5 | -0.0043 | [-0.0619, +0.0527] | 0.0573 | 0.434 | 0.868 | - | - |
+| secondary | A3 hybrid - A0 ECFP4+RF | final | two_level | 4/5 | +0.0314 | [-0.0258, +0.0874] | 0.0566 | 0.852 | 0.296 | - | - |
+| secondary | A3 hybrid - A0 ECFP4+RF | final | paired_items | 4/5 | +0.0314 | [-0.0270, +0.0891] | 0.0580 | 0.859 | 0.282 | - | - |
+| exploratory | A1 text only - A0 ECFP4+RF | best | two_level | 4/5 | -0.0099 | [-0.0641, +0.0434] | 0.0538 | 0.350 | 0.700 | - | - |
+| exploratory | A1 text only - A0 ECFP4+RF | best | paired_items | 4/5 | -0.0099 | [-0.0614, +0.0410] | 0.0512 | 0.346 | 0.692 | - | - |
+| exploratory | A1 text only - A0 ECFP4+RF | final | two_level | 4/5 | +0.0229 | [-0.0240, +0.0723] | 0.0481 | 0.833 | 0.334 | - | - |
+| exploratory | A1 text only - A0 ECFP4+RF | final | paired_items | 4/5 | +0.0229 | [-0.0238, +0.0702] | 0.0470 | 0.833 | 0.334 | - | - |
+| exploratory | A3 hybrid - A2 graph only | best | two_level | 4/5 | +0.0764 | [+0.0277, +0.1275] | 0.0499 | 0.999 | 0.002 | - | - |
+| exploratory | A3 hybrid - A2 graph only | best | paired_items | 4/5 | +0.0764 | [+0.0290, +0.1297] | 0.0504 | 1.000 | 0.000 | - | - |
+| exploratory | A3 hybrid - A2 graph only | final | two_level | 4/5 | +0.1146 | [+0.0524, +0.1744] | 0.0610 | 1.000 | 0.000 | - | - |
+| exploratory | A3 hybrid - A2 graph only | final | paired_items | 4/5 | +0.1146 | [+0.0550, +0.1760] | 0.0605 | 1.000 | 0.000 | - | - |
 
