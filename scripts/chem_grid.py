@@ -89,11 +89,14 @@ def prepare(root: Path, ds: str, log):
     return data_root
 
 
-def job(root: Path, ds: str, arm: str, seed: int, threads: int, extra: list):
+def job(root: Path, ds: str, arm: str, seed: int, threads: int, extra: list, deadline=None):
+    import time
     data_root, runs = root / ds, root / ds / "runs"
     d = runs / run_dir_name(ds, arm, seed)
     if (d / "metrics.json").exists():
         return f"skip {d.name}"
+    if deadline is not None and time.time() > deadline:
+        return f"deferred {d.name}"            # past --max_minutes: left for the next invocation
     env = dict(os.environ, OMP_NUM_THREADS=str(threads), MKL_NUM_THREADS=str(threads), TOKENIZERS_PARALLELISM="false")
     logf = root / "logs" / f"{d.name}.log"
     logf.parent.mkdir(parents=True, exist_ok=True)
@@ -246,6 +249,9 @@ def main():
     ap.add_argument("--workers", type=int, default=1)
     ap.add_argument("--threads", type=int, default=4)
     ap.add_argument("--extra", default="", help="extra run.py arguments, e.g. '--epochs 100 --patience 100'")
+    ap.add_argument("--max_minutes", type=float, default=None,
+                    help="start no new job after this many minutes (running jobs finish); rerun the same command to "
+                         "continue. For environments that stop long-lived processes")
     ap.add_argument("--summarise_only", action="store_true")
     ap.add_argument("--export", default=None, help="after the grid, copy compact results to this (git-tracked) directory")
     ap.add_argument("--restore_from", default=None, help="recreate finished run directories from an --export directory first")
@@ -261,8 +267,10 @@ def main():
         # seed-major order: every arm of seed 0 (both datasets) before seed 1, so partial grids are balanced
         jobs = [(ds, arm, seed) for seed in args.seeds for ds in args.datasets for arm in args.arms]
         extra = args.extra.split() if args.extra else []
+        import time
+        deadline = time.time() + 60 * args.max_minutes if args.max_minutes else None
         with ThreadPoolExecutor(max_workers=args.workers) as ex:
-            futs = [ex.submit(job, root, ds, arm, seed, args.threads, extra) for ds, arm, seed in jobs]
+            futs = [ex.submit(job, root, ds, arm, seed, args.threads, extra, deadline) for ds, arm, seed in jobs]
             for fu in as_completed(futs):
                 print(fu.result(), flush=True)
     summary = summarise(root, args.datasets, args.seeds)
