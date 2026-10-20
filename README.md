@@ -82,6 +82,14 @@ python scripts/compare_runs.py --a "runs/hybrid_bs16_lr1.0e-04_br0.30_seed*" --b
 python run.py --mode test --run_dir runs/hybrid_bs16_lr1.0e-04_br0.30_seed0
 ```
 
+### 化学（SMILES ＋ 分子グラフ。詳細は `docs/CHEM_PROTOCOL_ja.md` と RUNBOOK §12）
+
+同じ分子を、化学言語モデル（ChemBERTa-2）が SMILES 文字列として、R-GCN が分子グラフ（原子＝ノード、結合の型＝関係）として読む。コードの CPG の代わりに `run.py --molgraph` で入力を作る以外は、学習・比較の仕組みはコードと同じ。
+
+```bash
+python scripts/chem_grid.py --root experiments/chem --datasets ogb_molbace ogb_molbbbp --seeds 0 1 2 3 4
+```
+
 ### 課題スイート（非セキュリティの多クラス課題。詳細は `docs/TASK_SUITE_ja.md` と RUNBOOK §11）
 
 ```bash

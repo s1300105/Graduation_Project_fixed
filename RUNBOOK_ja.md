@@ -212,3 +212,40 @@ python scripts/compare_runs.py --metric macro_f1 --a "runs_poj/poj_hybrid_bs16*"
 | 学習 1 epoch（hybrid） | BigVul の 1/3 程度 | BigVul の 2/3 程度 | BigVul の 1/6 程度 |
 
 いずれも処理系の実測を取ってから本番の seed 数を決める（§6 の手順と同じ）。
+
+## 12. 化学（分子）: SMILES ＋ 分子グラフ
+
+設計と事前登録は `docs/CHEM_PROTOCOL_ja.md`。BACE と BBBP は CPU でも回る（この repo の結果 `docs/results/chem_cpu_v1/` は 4 コア CPU で作った）。HIV と 10 seed・100 エポックの本番は GPU で回す。
+
+```bash
+pip install rdkit                      # 結果は RDKit 2026.09.1 で作った（版で解析できる SMILES と原子特徴が少し変わる）
+
+# 一括（準備 → 全腕 → 集計）。中断しても同じコマンドで続きから再開する
+python scripts/chem_grid.py --root experiments/chem --datasets ogb_molbace ogb_molbbbp --seeds 0 1 2 3 4 5 6 7 8 9 \
+    --workers 1 --threads 8 --extra "--epochs 100 --patience 100"
+python scripts/chem_grid.py --root experiments/chem --datasets ogb_molhiv --seeds 0 1 2 3 4 5 6 7 8 9 \
+    --workers 1 --threads 8 --extra "--epochs 100 --patience 100"
+cat experiments/chem/summary.md
+```
+
+個別に動かす場合:
+
+```bash
+python data/scripts/make_molnet_json.py --dataset ogb_molhiv --input data/raw/ogb --download --out_dir data_hiv/cleaned_data
+python run.py --molgraph --dataset ogb_molhiv --data_root data_hiv --text_model DeepChem/ChemBERTa-77M-MTR
+COMMON="--data_root data_hiv --runs_dir runs_hiv --run_prefix hiv_ --loss ce --select_on auc --epochs 100 --patience 100 --max_length 256 --eval_batch_size 64 --seeds 0 1 2 3 4 5 6 7 8 9"
+python run.py --mode train --model_type codebert $COMMON                       # A1 テキストのみ
+python run.py --mode train --model_type graph_only $COMMON                     # A2
+python run.py --mode train --model_type hybrid $COMMON                         # A3
+python run.py --mode train --model_type hybrid --ablation no_edges $COMMON     # A3e
+python run.py --mode train --model_type hybrid --ablation shuffle_edges $COMMON  # A3s
+python scripts/fingerprint_baseline.py --data_root data_hiv --dataset ogb_molhiv --runs_dir runs_hiv --run_prefix hiv_ --seeds 0 1 2 3 4
+python scripts/compare_runs.py --metric auc --seed_bootstrap --a "runs_hiv/hiv_hybrid_bs16*" --b "runs_hiv/hiv_codebert_bs16*"
+python scripts/compare_runs.py --metric auc --seed_bootstrap --a "runs_hiv/hiv_hybrid_bs16*" --b "runs_hiv/hiv_hybrid-no_edges_bs16*"
+```
+
+- **既定の focal loss と F1 閾値選択は使わない**（`--loss ce --select_on auc`）。scaffold 分割では valid と test の陽性率が大きく違う（BBBP: train 0.84 / valid 0.41 / test 0.53）ので、閾値つきの F1 は意味を失う。
+- 指標は test ROC-AUC。HIV は陽性 3% なので PR-AUC も見る（`metrics.json` の `test_pr_auc`）。`final_epoch` は最後のエポックの値で、検証によるモデル選択に依存しない参照値。
+- `--model_type codebert` は「テキストのみ」の腕の名前で、中身は manifest の `text_model`（ChemBERTa）になる。
+- MoLFormer（`ibm-research/MoLFormer-XL-both-10pct`）で感度を見る場合は `--text_model ibm-research/MoLFormer-XL-both-10pct --trust_remote_code --max_length 202` を付ける。事前学習が立体情報なしの SMILES なので、`make_molnet_json.py` の出力の立体情報を落とすかどうかを先に決める（BACE では立体異性体でラベルが違うものがある）。
+- HIV の時間の目安: CPU 4 コアでは 77M のテキスト枝つきの腕が 1 seed・30 エポックで約 4 時間。GPU なら数分〜十数分の見込み（未計測）。
