@@ -31,6 +31,7 @@ def _load(name, path):
 MOLNET = _load("make_molnet_json", ROOT / "data" / "scripts" / "make_molnet_json.py")
 CR = _load("compare_runs", ROOT / "scripts" / "compare_runs.py")
 FP = _load("fingerprint_baseline", ROOT / "scripts" / "fingerprint_baseline.py")
+CG = _load("chem_grid", ROOT / "scripts" / "chem_grid.py")
 
 # small real molecules from several scaffolds (benzene, pyridine, cyclohexane, acyclic, naphthalene ...)
 SMILES = ["c1ccccc1O", "c1ccccc1N", "c1ccccc1C(=O)O", "Cc1ccccc1", "c1ccncc1", "Cc1ccncc1", "Oc1ccncc1",
@@ -176,3 +177,21 @@ def test_fingerprint_baseline_writes_a_comparable_run(tmp_path):
     d = tmp_path / "runs" / "ecfp_rf_seed0"
     m = json.loads((d / "metrics.json").read_text())
     assert m["test_auc"] > 0.9 and np.load(d / "test_preds.npz")["idx"].tolist() == list(range(200, 220))
+
+
+def test_summary_has_one_arm_table_per_dataset(tmp_path):
+    # the arm tables were once emitted inside the Holm loop: one table per primary test, all of them the
+    # last dataset's. Arms that form no contrast, so no compare_runs subprocess is started.
+    aucs = {"dsA": {"graph_only": [0.70, 0.80], "ecfp_rf": [0.60]}, "dsB": {"graph_only": [0.55]}}
+    for ds, arms in aucs.items():
+        for arm, vals in arms.items():
+            for seed, v in enumerate(vals):
+                d = tmp_path / ds / "runs" / CG.run_dir_name(ds, arm, seed)
+                d.mkdir(parents=True)
+                (d / "metrics.json").write_text(json.dumps({"test_auc": v, "test_pr_auc": v, "val_auc": v,
+                                                            "final_epoch": {"test_auc": v}, "best_epoch": 1}))
+    md = CG.summarise(tmp_path, ["dsA", "dsB"], [0, 1]).read_text()
+    assert md.count("## dsA\n") == 1 and md.count("## dsB\n") == 1
+    a, b = md.split("## dsA\n")[1].split("## dsB\n")
+    assert "| A2 graph only | 2 | 0.750 +/- 0.071 |" in a and "| A0 ECFP4+RF | 1 | 0.600 +/- 0.000 |" in a
+    assert "| A2 graph only | 1 | 0.550 +/- 0.000 |" in b and "ECFP4" not in b

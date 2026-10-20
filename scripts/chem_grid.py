@@ -165,10 +165,11 @@ def summarise(root: Path, datasets, seeds):
     for c, p in zip(prim, holm([c["p_two_sided"] for c in prim])):
         c["p_holm"] = p
         c["decision"] = "positive" if (c["diff"] > 0 and p < 0.05) else ("negative" if (c["diff"] < 0 and p < 0.05) else "no difference shown")
+    f = lambda t: "-" if t is None else f"{t[0]:.3f} +/- {t[1]:.3f}"
+    for ds, dd in out["datasets"].items():
         md += [f"## {ds}", "", "| arm | n | test ROC-AUC (best) | test ROC-AUC (final) | test PR-AUC | val ROC-AUC |",
                "|---|---|---|---|---|---|"]
-        f = lambda t: "-" if t is None else f"{t[0]:.3f} +/- {t[1]:.3f}"
-        for arm, v in arms.items():
+        for arm, v in dd["arms"].items():
             md.append(f"| {ARM_LABELS.get(arm, arm)} | {v['test_auc'][2] if v['test_auc'] else 0} | {f(v['test_auc'])} | "
                       f"{f(v['final_test_auc'])} | {f(v['test_pr_auc'])} | {f(v['val_auc'])} |")
         md.append("")
