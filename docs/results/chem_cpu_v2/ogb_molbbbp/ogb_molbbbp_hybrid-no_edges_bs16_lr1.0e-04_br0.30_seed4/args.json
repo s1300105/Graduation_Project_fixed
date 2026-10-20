@@ -1,0 +1,164 @@
+{
+ "args": {
+  "cpg": false,
+  "embed": false,
+  "molgraph": false,
+  "resume": false,
+  "mode": "train",
+  "data_root": "/home/user/Graduation_Project_fixed/experiments/chem_v2/ogb_molbbbp",
+  "dataset": "ogb_molbbbp",
+  "num_classes": null,
+  "graph_unit": "first_method",
+  "train_jsonl": "/home/user/Graduation_Project_fixed/experiments/chem_v2/ogb_molbbbp/cleaned_data/ogb_molbbbp_train.jsonl",
+  "valid_jsonl": "/home/user/Graduation_Project_fixed/experiments/chem_v2/ogb_molbbbp/cleaned_data/ogb_molbbbp_valid.jsonl",
+  "test_jsonl": "/home/user/Graduation_Project_fixed/experiments/chem_v2/ogb_molbbbp/cleaned_data/ogb_molbbbp_test.jsonl",
+  "max_chars": null,
+  "min_chars": 0,
+  "slice_size": 500,
+  "joern_cli_dir": "joern/joern-cli/",
+  "normalize_graph_identifiers": false,
+  "keep_intermediate": false,
+  "rescue_stages": "ABC",
+  "no_rescue_macros": false,
+  "max_nodes": 500,
+  "node_embedding": "codebert",
+  "node_max_len": 128,
+  "node_cache_size": 200000,
+  "node_code_mode": "full",
+  "reverse_edges": false,
+  "num_relations": 3,
+  "model_type": "hybrid",
+  "ablation": "no_edges",
+  "text_model": null,
+  "trust_remote_code": false,
+  "hidden_dim": 200,
+  "rgcn_layers": 6,
+  "fusion_layers": 3,
+  "tune_last_n_layers": 2,
+  "max_length": 256,
+  "gate_temperature": 1.0,
+  "batch_sizes": [
+   16
+  ],
+  "lrs": [
+   0.0001
+  ],
+  "bert_lr_ratios": [
+   0.3
+  ],
+  "seeds": [
+   4
+  ],
+  "epochs": 30,
+  "patience": 30,
+  "select_on": "auc",
+  "subset_frac": 1.0,
+  "loss": "ce",
+  "focal_gamma": 2.0,
+  "weight_decay": 0.0005,
+  "warmup_ratio": 0.1,
+  "clip_grad": 1.0,
+  "eval_batch_size": 64,
+  "seed": 42,
+  "no_deterministic": false,
+  "runs_dir": "/home/user/Graduation_Project_fixed/experiments/chem_v2/ogb_molbbbp/runs",
+  "run_prefix": "ogb_molbbbp_",
+  "overwrite": true,
+  "run_dir": null,
+  "allow_other_data_root": false
+ },
+ "batch_size": 16,
+ "lr": 0.0001,
+ "bert_lr_ratio": 0.3,
+ "seed": 4,
+ "git_commit": "8f91aac5e8dce5c14dd67ad963ae73d50325e911",
+ "class_counts": {
+  "0": 262,
+  "1": 1369
+ },
+ "alpha": [
+  1.0,
+  1.0
+ ],
+ "train_samples_per_epoch": 1631,
+ "num_relations": 5,
+ "node_feat_dim": 174,
+ "num_classes": 2,
+ "text_model": "DeepChem/ChemBERTa-77M-MTR",
+ "num_node_labels": 120,
+ "dataset": "ogb_molbbbp",
+ "data_root": "/home/user/Graduation_Project_fixed/experiments/chem_v2/ogb_molbbbp",
+ "graph_unit": "molecule",
+ "input_manifest": {
+  "graph_unit": "molecule",
+  "featuriser": "ogb_atom_onehot_v1",
+  "row_order": "shuffled(seed=42)",
+  "reverse_edges": false,
+  "max_nodes": null,
+  "node_embedding": "ogb_atom_onehot",
+  "num_relations": 5,
+  "relations": [
+   "SINGLE",
+   "DOUBLE",
+   "TRIPLE",
+   "AROMATIC",
+   "misc"
+  ],
+  "node_feat_dim": 174,
+  "num_node_labels": 120,
+  "num_classes": 2,
+  "dataset": "ogb_molbbbp",
+  "text_model": "DeepChem/ChemBERTa-77M-MTR",
+  "classes_json": "/home/user/Graduation_Project_fixed/experiments/chem_v2/ogb_molbbbp/cleaned_data/ogb_molbbbp_classes.json",
+  "counts": {
+   "rows": 2039,
+   "graphs": 2039,
+   "rows_without_graph": 0,
+   "rows_with_extra_graphs": 0,
+   "graphs_at_cap": 0
+  },
+  "counts_cover": "all",
+  "splits": {
+   "train": {
+    "rows": 1631,
+    "graphs": 1631,
+    "lost_idx": [],
+    "label_counts": {
+     "0": 262,
+     "1": 1369
+    }
+   },
+   "valid": {
+    "rows": 204,
+    "graphs": 204,
+    "lost_idx": [],
+    "label_counts": {
+     "0": 121,
+     "1": 83
+    }
+   },
+   "test": {
+    "rows": 204,
+    "graphs": 204,
+    "lost_idx": [],
+    "label_counts": {
+     "0": 96,
+     "1": 108
+    }
+   }
+  },
+  "node_sum": 49068,
+  "edge_sum": 105842,
+  "nodes_mean": 24.064737616478666,
+  "edges_mean": 51.9087788131437,
+  "input_files": [
+   "test_0_input.pkl",
+   "train_0_input.pkl",
+   "valid_0_input.pkl"
+  ]
+ },
+ "params_trainable": 7242984,
+ "params_new_non_codebert": 5342792,
+ "device": "cpu",
+ "torch": "2.14.1+cpu"
+}
