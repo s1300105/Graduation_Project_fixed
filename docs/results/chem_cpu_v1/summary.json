@@ -12,27 +12,36 @@
        "final_test_auc": 0.8567205703355938,
        "best_epoch": null,
        "gate_graph_last_epoch": null
+      },
+      {
+       "seed": 1,
+       "test_auc": 0.8531559728742827,
+       "test_pr_auc": 0.8647865750442348,
+       "val_auc": 0.7234432234432234,
+       "final_test_auc": 0.8531559728742827,
+       "best_epoch": null,
+       "gate_graph_last_epoch": null
       }
      ],
      "test_auc": [
-      0.8567205703355938,
-      0.0,
-      1
+      0.8549382716049383,
+      0.002520551037093433,
+      2
      ],
      "final_test_auc": [
-      0.8567205703355938,
-      0.0,
-      1
+      0.8549382716049383,
+      0.002520551037093433,
+      2
      ],
      "test_pr_auc": [
-      0.8661316730790827,
-      0.0,
-      1
+      0.8654591240616587,
+      0.0009511279418016038,
+      2
      ],
      "val_auc": [
-      0.719047619047619,
-      0.0,
-      1
+      0.7212454212454212,
+      0.003108161675545253,
+      2
      ]
     },
     "graph_only": {
@@ -45,27 +54,36 @@
        "final_test_auc": 0.6642323074247957,
        "best_epoch": 29,
        "gate_graph_last_epoch": null
+      },
+      {
+       "seed": 1,
+       "test_auc": 0.6969222743870631,
+       "test_pr_auc": 0.6762357250309349,
+       "val_auc": 0.578021978021978,
+       "final_test_auc": 0.6969222743870631,
+       "best_epoch": 30,
+       "gate_graph_last_epoch": null
       }
      ],
      "test_auc": [
-      0.6644061902277865,
-      0.0,
-      1
+      0.6806642323074248,
+      0.022992343606656997,
+      2
      ],
      "final_test_auc": [
-      0.6642323074247957,
-      0.0,
-      1
+      0.6805772909059293,
+      0.023115297315783514,
+      2
      ],
      "test_pr_auc": [
-      0.6438054697705415,
-      0.0,
-      1
+      0.6600205974007383,
+      0.022931653410234832,
+      2
      ],
      "val_auc": [
-      0.5443223443223444,
-      0.0,
-      1
+      0.5611721611721612,
+      0.023829239512513607,
+      2
      ]
     },
     "graph_only-no_edges": {
@@ -78,27 +96,36 @@
        "final_test_auc": 0.7035298209007128,
        "best_epoch": 1,
        "gate_graph_last_epoch": null
+      },
+      {
+       "seed": 1,
+       "test_auc": 0.5992001391062425,
+       "test_pr_auc": 0.6053194437710002,
+       "val_auc": 0.573992673992674,
+       "final_test_auc": 0.6802295252999478,
+       "best_epoch": 2,
+       "gate_graph_last_epoch": null
       }
      ],
      "test_auc": [
-      0.6303251608415927,
-      0.0,
-      1
+      0.6147626499739176,
+      0.022008713933644848,
+      2
      ],
      "final_test_auc": [
-      0.7035298209007128,
-      0.0,
-      1
+      0.6918796731003303,
+      0.016475797022951988,
+      2
      ],
      "test_pr_auc": [
-      0.6305727223133917,
-      0.0,
-      1
+      0.6179460830421959,
+      0.01785676450451773,
+      2
      ],
      "val_auc": [
-      0.5882783882783883,
-      0.0,
-      1
+      0.5811355311355311,
+      0.01010152544552215,
+      2
      ]
     },
     "codebert": {
@@ -111,27 +138,36 @@
        "final_test_auc": 0.7892540427751694,
        "best_epoch": 10,
        "gate_graph_last_epoch": null
+      },
+      {
+       "seed": 1,
+       "test_auc": 0.7600417318727178,
+       "test_pr_auc": 0.7643855057332541,
+       "val_auc": 0.7450549450549451,
+       "final_test_auc": 0.7927316988349852,
+       "best_epoch": 11,
+       "gate_graph_last_epoch": null
       }
      ],
      "test_auc": [
-      0.7400452095287776,
-      0.0,
-      1
+      0.7500434707007477,
+      0.01413967654954845,
+      2
      ],
      "final_test_auc": [
-      0.7892540427751694,
-      0.0,
-      1
+      0.7909928708050773,
+      0.002459074182530213,
+      2
      ],
      "test_pr_auc": [
-      0.7433735713778313,
-      0.0,
-      1
+      0.7538795385555428,
+      0.01485768126856606,
+      2
      ],
      "val_auc": [
-      0.7527472527472528,
-      0.0,
-      1
+      0.7489010989010989,
+      0.0054392829322042705,
+      2
      ]
     },
     "hybrid": {
@@ -144,25 +180,798 @@
        "final_test_auc": 0.7899495739871327,
        "best_epoch": 17,
        "gate_graph_last_epoch": 0.993690598455846
+      },
+      {
+       "seed": 1,
+       "test_auc": 0.7889062771691879,
+       "test_pr_auc": 0.8050320028149494,
+       "val_auc": 0.76007326007326,
+       "final_test_auc": 0.8062945574682664,
+       "best_epoch": 16,
+       "gate_graph_last_epoch": 0.9718541800730714
       }
      ],
      "test_auc": [
-      0.7762128325508606,
+      0.7825595548600243,
+      0.008975620766235143,
+      2
+     ],
+     "final_test_auc": [
+      0.7981220657276995,
+      0.011557648657891719,
+      2
+     ],
+     "test_pr_auc": [
+      0.7995384051945421,
+      0.007769120261000484,
+      2
+     ],
+     "val_auc": [
+      0.7663003663003662,
+      0.008806458080711628,
+      2
+     ]
+    },
+    "hybrid-no_edges": {
+     "runs": [
+      {
+       "seed": 0,
+       "test_auc": 0.7709963484611371,
+       "test_pr_auc": 0.7877121031057672,
+       "val_auc": 0.7714285714285715,
+       "final_test_auc": 0.7885585115632064,
+       "best_epoch": 13,
+       "gate_graph_last_epoch": 0.9976241227766303
+      },
+      {
+       "seed": 1,
+       "test_auc": 0.7777777777777778,
+       "test_pr_auc": 0.7969986606136717,
+       "val_auc": 0.7545787545787546,
+       "final_test_auc": 0.8054251434533124,
+       "best_epoch": 13,
+       "gate_graph_last_epoch": 0.0036742648011759416
+      }
+     ],
+     "test_auc": [
+      0.7743870631194574,
+      0.004795194655933908,
+      2
+     ],
+     "final_test_auc": [
+      0.7969918275082595,
+      0.011926509785271195,
+      2
+     ],
+     "test_pr_auc": [
+      0.7923553818597195,
+      0.006566587787718135,
+      2
+     ],
+     "val_auc": [
+      0.763003663003663,
+      0.011914619756256881,
+      2
+     ]
+    },
+    "hybrid-shuffle_edges": {
+     "runs": [
+      {
+       "seed": 0,
+       "test_auc": 0.76943140323422,
+       "test_pr_auc": 0.7926701983025273,
+       "val_auc": 0.7761904761904762,
+       "final_test_auc": 0.7732568249000173,
+       "best_epoch": 17,
+       "gate_graph_last_epoch": 0.004651202183020731
+      }
+     ],
+     "test_auc": [
+      0.76943140323422,
       0.0,
       1
      ],
      "final_test_auc": [
-      0.7899495739871327,
+      0.7732568249000173,
       0.0,
       1
      ],
      "test_pr_auc": [
-      0.7940448075741349,
+      0.7926701983025273,
       0.0,
       1
      ],
      "val_auc": [
-      0.7725274725274726,
+      0.7761904761904762,
+      0.0,
+      1
+     ]
+    }
+   },
+   "contrasts": [
+    {
+     "a": "hybrid",
+     "b": "codebert",
+     "role": "primary",
+     "preds": "best",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.0325  95% two-level (seeds x items) CI [+0.0022, +0.0665]  P(A>B)=0.982",
+     "diff": 0.0325,
+     "lo": 0.0022,
+     "hi": 0.0665,
+     "p_a_gt_b": 0.982,
+     "p_two_sided": 0.03600000000000003,
+     "half_width": 0.032150000000000005,
+     "p_holm": 0.14400000000000013,
+     "decision": "no difference shown"
+    },
+    {
+     "a": "hybrid",
+     "b": "codebert",
+     "role": "primary",
+     "preds": "best",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.0325  95% paired-bootstrap CI [+0.0060, +0.0596]  P(A>B)=0.993",
+     "diff": 0.0325,
+     "lo": 0.006,
+     "hi": 0.0596,
+     "p_a_gt_b": 0.993,
+     "p_two_sided": 0.014000000000000012,
+     "half_width": 0.0268
+    },
+    {
+     "a": "hybrid",
+     "b": "codebert",
+     "role": "primary",
+     "preds": "final",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.0071  95% two-level (seeds x items) CI [-0.0173, +0.0339]  P(A>B)=0.720",
+     "diff": 0.0071,
+     "lo": -0.0173,
+     "hi": 0.0339,
+     "p_a_gt_b": 0.72,
+     "p_two_sided": 0.56,
+     "half_width": 0.025599999999999998
+    },
+    {
+     "a": "hybrid",
+     "b": "codebert",
+     "role": "primary",
+     "preds": "final",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.0071  95% paired-bootstrap CI [-0.0138, +0.0292]  P(A>B)=0.743",
+     "diff": 0.0071,
+     "lo": -0.0138,
+     "hi": 0.0292,
+     "p_a_gt_b": 0.743,
+     "p_two_sided": 0.514,
+     "half_width": 0.0215
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-no_edges",
+     "role": "primary",
+     "preds": "best",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.0082  95% two-level (seeds x items) CI [-0.0080, +0.0246]  P(A>B)=0.852",
+     "diff": 0.0082,
+     "lo": -0.008,
+     "hi": 0.0246,
+     "p_a_gt_b": 0.852,
+     "p_two_sided": 0.29600000000000004,
+     "half_width": 0.016300000000000002,
+     "p_holm": 0.552,
+     "decision": "no difference shown"
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-no_edges",
+     "role": "primary",
+     "preds": "best",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.0082  95% paired-bootstrap CI [-0.0011, +0.0184]  P(A>B)=0.958",
+     "diff": 0.0082,
+     "lo": -0.0011,
+     "hi": 0.0184,
+     "p_a_gt_b": 0.958,
+     "p_two_sided": 0.08400000000000007,
+     "half_width": 0.00975
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-no_edges",
+     "role": "primary",
+     "preds": "final",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.0011  95% two-level (seeds x items) CI [-0.0196, +0.0248]  P(A>B)=0.537",
+     "diff": 0.0011,
+     "lo": -0.0196,
+     "hi": 0.0248,
+     "p_a_gt_b": 0.537,
+     "p_two_sided": 0.9259999999999999,
+     "half_width": 0.022199999999999998
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-no_edges",
+     "role": "primary",
+     "preds": "final",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.0011  95% paired-bootstrap CI [-0.0066, +0.0105]  P(A>B)=0.598",
+     "diff": 0.0011,
+     "lo": -0.0066,
+     "hi": 0.0105,
+     "p_a_gt_b": 0.598,
+     "p_two_sided": 0.804,
+     "half_width": 0.00855
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-shuffle_edges",
+     "role": "secondary",
+     "preds": "best",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 1,
+     "line": "A - B: +0.0131  95% two-level (seeds x items) CI [-0.0025, +0.0344]  P(A>B)=0.948",
+     "diff": 0.0131,
+     "lo": -0.0025,
+     "hi": 0.0344,
+     "p_a_gt_b": 0.948,
+     "p_two_sided": 0.10400000000000009,
+     "half_width": 0.01845
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-shuffle_edges",
+     "role": "secondary",
+     "preds": "best",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 1,
+     "line": "A - B: +0.0131  95% paired-bootstrap CI [-0.0017, +0.0295]  P(A>B)=0.956",
+     "diff": 0.0131,
+     "lo": -0.0017,
+     "hi": 0.0295,
+     "p_a_gt_b": 0.956,
+     "p_two_sided": 0.08800000000000008,
+     "half_width": 0.0156
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-shuffle_edges",
+     "role": "secondary",
+     "preds": "final",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 1,
+     "line": "A - B: +0.0249  95% two-level (seeds x items) CI [+0.0021, +0.0573]  P(A>B)=0.986",
+     "diff": 0.0249,
+     "lo": 0.0021,
+     "hi": 0.0573,
+     "p_a_gt_b": 0.986,
+     "p_two_sided": 0.028000000000000025,
+     "half_width": 0.0276
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-shuffle_edges",
+     "role": "secondary",
+     "preds": "final",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 1,
+     "line": "A - B: +0.0249  95% paired-bootstrap CI [+0.0030, +0.0512]  P(A>B)=0.991",
+     "diff": 0.0249,
+     "lo": 0.003,
+     "hi": 0.0512,
+     "p_a_gt_b": 0.991,
+     "p_two_sided": 0.018000000000000016,
+     "half_width": 0.0241
+    },
+    {
+     "a": "graph_only",
+     "b": "graph_only-no_edges",
+     "role": "secondary",
+     "preds": "best",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.0659  95% two-level (seeds x items) CI [-0.0075, +0.1412]  P(A>B)=0.958",
+     "diff": 0.0659,
+     "lo": -0.0075,
+     "hi": 0.1412,
+     "p_a_gt_b": 0.958,
+     "p_two_sided": 0.08400000000000007,
+     "half_width": 0.07435
+    },
+    {
+     "a": "graph_only",
+     "b": "graph_only-no_edges",
+     "role": "secondary",
+     "preds": "best",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.0659  95% paired-bootstrap CI [-0.0034, +0.1309]  P(A>B)=0.970",
+     "diff": 0.0659,
+     "lo": -0.0034,
+     "hi": 0.1309,
+     "p_a_gt_b": 0.97,
+     "p_two_sided": 0.06000000000000005,
+     "half_width": 0.06714999999999999
+    },
+    {
+     "a": "graph_only",
+     "b": "graph_only-no_edges",
+     "role": "secondary",
+     "preds": "final",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: -0.0113  95% two-level (seeds x items) CI [-0.0954, +0.0687]  P(A>B)=0.387",
+     "diff": -0.0113,
+     "lo": -0.0954,
+     "hi": 0.0687,
+     "p_a_gt_b": 0.387,
+     "p_two_sided": 0.774,
+     "half_width": 0.08205
+    },
+    {
+     "a": "graph_only",
+     "b": "graph_only-no_edges",
+     "role": "secondary",
+     "preds": "final",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: -0.0113  95% paired-bootstrap CI [-0.0886, +0.0639]  P(A>B)=0.364",
+     "diff": -0.0113,
+     "lo": -0.0886,
+     "hi": 0.0639,
+     "p_a_gt_b": 0.364,
+     "p_two_sided": 0.728,
+     "half_width": 0.07625
+    },
+    {
+     "a": "hybrid",
+     "b": "ecfp_rf",
+     "role": "secondary",
+     "preds": "best",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: -0.0724  95% two-level (seeds x items) CI [-0.1326, -0.0148]  P(A>B)=0.005",
+     "diff": -0.0724,
+     "lo": -0.1326,
+     "hi": -0.0148,
+     "p_a_gt_b": 0.005,
+     "p_two_sided": 0.01,
+     "half_width": 0.058899999999999994
+    },
+    {
+     "a": "hybrid",
+     "b": "ecfp_rf",
+     "role": "secondary",
+     "preds": "best",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: -0.0724  95% paired-bootstrap CI [-0.1346, -0.0171]  P(A>B)=0.005",
+     "diff": -0.0724,
+     "lo": -0.1346,
+     "hi": -0.0171,
+     "p_a_gt_b": 0.005,
+     "p_two_sided": 0.01,
+     "half_width": 0.05875
+    },
+    {
+     "a": "hybrid",
+     "b": "ecfp_rf",
+     "role": "secondary",
+     "preds": "final",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: -0.0568  95% two-level (seeds x items) CI [-0.1149, -0.0025]  P(A>B)=0.019",
+     "diff": -0.0568,
+     "lo": -0.1149,
+     "hi": -0.0025,
+     "p_a_gt_b": 0.019,
+     "p_two_sided": 0.038,
+     "half_width": 0.0562
+    },
+    {
+     "a": "hybrid",
+     "b": "ecfp_rf",
+     "role": "secondary",
+     "preds": "final",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: -0.0568  95% paired-bootstrap CI [-0.1118, -0.0067]  P(A>B)=0.013",
+     "diff": -0.0568,
+     "lo": -0.1118,
+     "hi": -0.0067,
+     "p_a_gt_b": 0.013,
+     "p_two_sided": 0.026,
+     "half_width": 0.05255
+    },
+    {
+     "a": "codebert",
+     "b": "ecfp_rf",
+     "role": "exploratory",
+     "preds": "best",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: -0.1049  95% two-level (seeds x items) CI [-0.1720, -0.0419]  P(A>B)=0.000",
+     "diff": -0.1049,
+     "lo": -0.172,
+     "hi": -0.0419,
+     "p_a_gt_b": 0.0,
+     "p_two_sided": 0.0,
+     "half_width": 0.06505
+    },
+    {
+     "a": "codebert",
+     "b": "ecfp_rf",
+     "role": "exploratory",
+     "preds": "best",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: -0.1049  95% paired-bootstrap CI [-0.1723, -0.0433]  P(A>B)=0.000",
+     "diff": -0.1049,
+     "lo": -0.1723,
+     "hi": -0.0433,
+     "p_a_gt_b": 0.0,
+     "p_two_sided": 0.0,
+     "half_width": 0.0645
+    },
+    {
+     "a": "codebert",
+     "b": "ecfp_rf",
+     "role": "exploratory",
+     "preds": "final",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: -0.0639  95% two-level (seeds x items) CI [-0.1194, -0.0118]  P(A>B)=0.005",
+     "diff": -0.0639,
+     "lo": -0.1194,
+     "hi": -0.0118,
+     "p_a_gt_b": 0.005,
+     "p_two_sided": 0.01,
+     "half_width": 0.0538
+    },
+    {
+     "a": "codebert",
+     "b": "ecfp_rf",
+     "role": "exploratory",
+     "preds": "final",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: -0.0639  95% paired-bootstrap CI [-0.1175, -0.0144]  P(A>B)=0.007",
+     "diff": -0.0639,
+     "lo": -0.1175,
+     "hi": -0.0144,
+     "p_a_gt_b": 0.007,
+     "p_two_sided": 0.014,
+     "half_width": 0.05155
+    },
+    {
+     "a": "hybrid",
+     "b": "graph_only",
+     "role": "exploratory",
+     "preds": "best",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.1019  95% two-level (seeds x items) CI [+0.0190, +0.1865]  P(A>B)=0.994",
+     "diff": 0.1019,
+     "lo": 0.019,
+     "hi": 0.1865,
+     "p_a_gt_b": 0.994,
+     "p_two_sided": 0.01200000000000001,
+     "half_width": 0.08375
+    },
+    {
+     "a": "hybrid",
+     "b": "graph_only",
+     "role": "exploratory",
+     "preds": "best",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.1019  95% paired-bootstrap CI [+0.0264, +0.1904]  P(A>B)=0.997",
+     "diff": 0.1019,
+     "lo": 0.0264,
+     "hi": 0.1904,
+     "p_a_gt_b": 0.997,
+     "p_two_sided": 0.006000000000000005,
+     "half_width": 0.082
+    },
+    {
+     "a": "hybrid",
+     "b": "graph_only",
+     "role": "exploratory",
+     "preds": "final",
+     "statistic": "two_level",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.1175  95% two-level (seeds x items) CI [+0.0348, +0.2028]  P(A>B)=0.999",
+     "diff": 0.1175,
+     "lo": 0.0348,
+     "hi": 0.2028,
+     "p_a_gt_b": 0.999,
+     "p_two_sided": 0.0020000000000000018,
+     "half_width": 0.084
+    },
+    {
+     "a": "hybrid",
+     "b": "graph_only",
+     "role": "exploratory",
+     "preds": "final",
+     "statistic": "paired_items",
+     "n_a": 2,
+     "n_b": 2,
+     "line": "A - B: +0.1175  95% paired-bootstrap CI [+0.0427, +0.2063]  P(A>B)=0.999",
+     "diff": 0.1175,
+     "lo": 0.0427,
+     "hi": 0.2063,
+     "p_a_gt_b": 0.999,
+     "p_two_sided": 0.0020000000000000018,
+     "half_width": 0.08180000000000001
+    }
+   ]
+  },
+  "ogb_molbbbp": {
+   "arms": {
+    "ecfp_rf": {
+     "runs": [
+      {
+       "seed": 0,
+       "test_auc": 0.6806037808641976,
+       "test_pr_auc": 0.7118397146551396,
+       "val_auc": 0.956736035049288,
+       "final_test_auc": 0.6806037808641976,
+       "best_epoch": null,
+       "gate_graph_last_epoch": null
+      }
+     ],
+     "test_auc": [
+      0.6806037808641976,
+      0.0,
+      1
+     ],
+     "final_test_auc": [
+      0.6806037808641976,
+      0.0,
+      1
+     ],
+     "test_pr_auc": [
+      0.7118397146551396,
+      0.0,
+      1
+     ],
+     "val_auc": [
+      0.956736035049288,
+      0.0,
+      1
+     ]
+    },
+    "graph_only": {
+     "runs": [
+      {
+       "seed": 0,
+       "test_auc": 0.591820987654321,
+       "test_pr_auc": 0.5845191031718049,
+       "val_auc": 0.9233296823658269,
+       "final_test_auc": 0.5831404320987655,
+       "best_epoch": 24,
+       "gate_graph_last_epoch": null
+      }
+     ],
+     "test_auc": [
+      0.591820987654321,
+      0.0,
+      1
+     ],
+     "final_test_auc": [
+      0.5831404320987655,
+      0.0,
+      1
+     ],
+     "test_pr_auc": [
+      0.5845191031718049,
+      0.0,
+      1
+     ],
+     "val_auc": [
+      0.9233296823658269,
+      0.0,
+      1
+     ]
+    },
+    "graph_only-no_edges": {
+     "runs": [
+      {
+       "seed": 0,
+       "test_auc": 0.6278935185185186,
+       "test_pr_auc": 0.6720802525980774,
+       "val_auc": 0.9077964751568257,
+       "final_test_auc": 0.6278935185185186,
+       "best_epoch": 30,
+       "gate_graph_last_epoch": null
+      }
+     ],
+     "test_auc": [
+      0.6278935185185186,
+      0.0,
+      1
+     ],
+     "final_test_auc": [
+      0.6278935185185186,
+      0.0,
+      1
+     ],
+     "test_pr_auc": [
+      0.6720802525980774,
+      0.0,
+      1
+     ],
+     "val_auc": [
+      0.9077964751568257,
+      0.0,
+      1
+     ]
+    },
+    "codebert": {
+     "runs": [
+      {
+       "seed": 0,
+       "test_auc": 0.6619405864197531,
+       "test_pr_auc": 0.7019365689376221,
+       "val_auc": 0.9587772577914965,
+       "final_test_auc": 0.7054398148148149,
+       "best_epoch": 7,
+       "gate_graph_last_epoch": null
+      }
+     ],
+     "test_auc": [
+      0.6619405864197531,
+      0.0,
+      1
+     ],
+     "final_test_auc": [
+      0.7054398148148149,
+      0.0,
+      1
+     ],
+     "test_pr_auc": [
+      0.7019365689376221,
+      0.0,
+      1
+     ],
+     "val_auc": [
+      0.9587772577914965,
+      0.0,
+      1
+     ]
+    },
+    "hybrid": {
+     "runs": [
+      {
+       "seed": 0,
+       "test_auc": 0.6810860339506174,
+       "test_pr_auc": 0.7175112792734376,
+       "val_auc": 0.9584785422682465,
+       "final_test_auc": 0.7151813271604939,
+       "best_epoch": 6,
+       "gate_graph_last_epoch": 0.19648667468744163
+      }
+     ],
+     "test_auc": [
+      0.6810860339506174,
+      0.0,
+      1
+     ],
+     "final_test_auc": [
+      0.7151813271604939,
+      0.0,
+      1
+     ],
+     "test_pr_auc": [
+      0.7175112792734376,
+      0.0,
+      1
+     ],
+     "val_auc": [
+      0.9584785422682465,
+      0.0,
+      1
+     ]
+    },
+    "hybrid-no_edges": {
+     "runs": [
+      {
+       "seed": 0,
+       "test_auc": 0.6915991512345679,
+       "test_pr_auc": 0.7234831048820565,
+       "val_auc": 0.9590759733147465,
+       "final_test_auc": 0.7217399691358025,
+       "best_epoch": 6,
+       "gate_graph_last_epoch": 0.0345196455132728
+      }
+     ],
+     "test_auc": [
+      0.6915991512345679,
+      0.0,
+      1
+     ],
+     "final_test_auc": [
+      0.7217399691358025,
+      0.0,
+      1
+     ],
+     "test_pr_auc": [
+      0.7234831048820565,
+      0.0,
+      1
+     ],
+     "val_auc": [
+      0.9590759733147465,
+      0.0,
+      1
+     ]
+    },
+    "hybrid-shuffle_edges": {
+     "runs": [
+      {
+       "seed": 0,
+       "test_auc": 0.6860050154320987,
+       "test_pr_auc": 0.7274475638678247,
+       "val_auc": 0.9582793985860798,
+       "final_test_auc": 0.7325424382716049,
+       "best_epoch": 6,
+       "gate_graph_last_epoch": 0.09960868896222586
+      }
+     ],
+     "test_auc": [
+      0.6860050154320987,
+      0.0,
+      1
+     ],
+     "final_test_auc": [
+      0.7325424382716049,
+      0.0,
+      1
+     ],
+     "test_pr_auc": [
+      0.7274475638678247,
+      0.0,
+      1
+     ],
+     "val_auc": [
+      0.9582793985860798,
       0.0,
       1
      ]
@@ -177,15 +986,15 @@
      "statistic": "two_level",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: +0.0362  95% two-level (seeds x items) CI [+0.0090, +0.0665]  P(A>B)=0.996",
-     "diff": 0.0362,
-     "lo": 0.009,
-     "hi": 0.0665,
-     "p_a_gt_b": 0.996,
-     "p_two_sided": 0.008000000000000007,
-     "half_width": 0.02875,
-     "p_holm": 0.008000000000000007,
-     "decision": "positive"
+     "line": "A - B: +0.0191  95% two-level (seeds x items) CI [-0.0127, +0.0512]  P(A>B)=0.886",
+     "diff": 0.0191,
+     "lo": -0.0127,
+     "hi": 0.0512,
+     "p_a_gt_b": 0.886,
+     "p_two_sided": 0.22799999999999998,
+     "half_width": 0.03195,
+     "p_holm": 0.552,
+     "decision": "no difference shown"
     },
     {
      "a": "hybrid",
@@ -195,13 +1004,13 @@
      "statistic": "paired_items",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: +0.0362  95% paired-bootstrap CI [+0.0090, +0.0665]  P(A>B)=0.996",
-     "diff": 0.0362,
-     "lo": 0.009,
-     "hi": 0.0665,
-     "p_a_gt_b": 0.996,
-     "p_two_sided": 0.008000000000000007,
-     "half_width": 0.02875
+     "line": "A - B: +0.0191  95% paired-bootstrap CI [-0.0127, +0.0512]  P(A>B)=0.886",
+     "diff": 0.0191,
+     "lo": -0.0127,
+     "hi": 0.0512,
+     "p_a_gt_b": 0.886,
+     "p_two_sided": 0.22799999999999998,
+     "half_width": 0.03195
     },
     {
      "a": "hybrid",
@@ -211,29 +1020,159 @@
      "statistic": "two_level",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: +0.0007  95% two-level (seeds x items) CI [-0.0234, +0.0251]  P(A>B)=0.513",
-     "diff": 0.0007,
+     "line": "A - B: +0.0097  95% two-level (seeds x items) CI [-0.0353, +0.0548]  P(A>B)=0.646",
+     "diff": 0.0097,
+     "lo": -0.0353,
+     "hi": 0.0548,
+     "p_a_gt_b": 0.646,
+     "p_two_sided": 0.708,
+     "half_width": 0.04505
+    },
+    {
+     "a": "hybrid",
+     "b": "codebert",
+     "role": "primary",
+     "preds": "final",
+     "statistic": "paired_items",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: +0.0097  95% paired-bootstrap CI [-0.0353, +0.0548]  P(A>B)=0.646",
+     "diff": 0.0097,
+     "lo": -0.0353,
+     "hi": 0.0548,
+     "p_a_gt_b": 0.646,
+     "p_two_sided": 0.708,
+     "half_width": 0.04505
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-no_edges",
+     "role": "primary",
+     "preds": "best",
+     "statistic": "two_level",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: -0.0105  95% two-level (seeds x items) CI [-0.0265, +0.0053]  P(A>B)=0.092",
+     "diff": -0.0105,
+     "lo": -0.0265,
+     "hi": 0.0053,
+     "p_a_gt_b": 0.092,
+     "p_two_sided": 0.184,
+     "half_width": 0.0159,
+     "p_holm": 0.552,
+     "decision": "no difference shown"
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-no_edges",
+     "role": "primary",
+     "preds": "best",
+     "statistic": "paired_items",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: -0.0105  95% paired-bootstrap CI [-0.0265, +0.0053]  P(A>B)=0.092",
+     "diff": -0.0105,
+     "lo": -0.0265,
+     "hi": 0.0053,
+     "p_a_gt_b": 0.092,
+     "p_two_sided": 0.184,
+     "half_width": 0.0159
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-no_edges",
+     "role": "primary",
+     "preds": "final",
+     "statistic": "two_level",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: -0.0066  95% two-level (seeds x items) CI [-0.0234, +0.0072]  P(A>B)=0.193",
+     "diff": -0.0066,
      "lo": -0.0234,
-     "hi": 0.0251,
-     "p_a_gt_b": 0.513,
-     "p_two_sided": 0.974,
-     "half_width": 0.02425
+     "hi": 0.0072,
+     "p_a_gt_b": 0.193,
+     "p_two_sided": 0.386,
+     "half_width": 0.015300000000000001
     },
     {
      "a": "hybrid",
-     "b": "codebert",
+     "b": "hybrid-no_edges",
      "role": "primary",
      "preds": "final",
      "statistic": "paired_items",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: +0.0007  95% paired-bootstrap CI [-0.0234, +0.0251]  P(A>B)=0.513",
-     "diff": 0.0007,
+     "line": "A - B: -0.0066  95% paired-bootstrap CI [-0.0234, +0.0072]  P(A>B)=0.193",
+     "diff": -0.0066,
      "lo": -0.0234,
-     "hi": 0.0251,
-     "p_a_gt_b": 0.513,
-     "p_two_sided": 0.974,
-     "half_width": 0.02425
+     "hi": 0.0072,
+     "p_a_gt_b": 0.193,
+     "p_two_sided": 0.386,
+     "half_width": 0.015300000000000001
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-shuffle_edges",
+     "role": "secondary",
+     "preds": "best",
+     "statistic": "two_level",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: -0.0049  95% two-level (seeds x items) CI [-0.0244, +0.0146]  P(A>B)=0.304",
+     "diff": -0.0049,
+     "lo": -0.0244,
+     "hi": 0.0146,
+     "p_a_gt_b": 0.304,
+     "p_two_sided": 0.608,
+     "half_width": 0.0195
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-shuffle_edges",
+     "role": "secondary",
+     "preds": "best",
+     "statistic": "paired_items",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: -0.0049  95% paired-bootstrap CI [-0.0244, +0.0146]  P(A>B)=0.304",
+     "diff": -0.0049,
+     "lo": -0.0244,
+     "hi": 0.0146,
+     "p_a_gt_b": 0.304,
+     "p_two_sided": 0.608,
+     "half_width": 0.0195
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-shuffle_edges",
+     "role": "secondary",
+     "preds": "final",
+     "statistic": "two_level",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: -0.0174  95% two-level (seeds x items) CI [-0.0420, +0.0059]  P(A>B)=0.070",
+     "diff": -0.0174,
+     "lo": -0.042,
+     "hi": 0.0059,
+     "p_a_gt_b": 0.07,
+     "p_two_sided": 0.14,
+     "half_width": 0.023950000000000003
+    },
+    {
+     "a": "hybrid",
+     "b": "hybrid-shuffle_edges",
+     "role": "secondary",
+     "preds": "final",
+     "statistic": "paired_items",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: -0.0174  95% paired-bootstrap CI [-0.0420, +0.0059]  P(A>B)=0.070",
+     "diff": -0.0174,
+     "lo": -0.042,
+     "hi": 0.0059,
+     "p_a_gt_b": 0.07,
+     "p_two_sided": 0.14,
+     "half_width": 0.023950000000000003
     },
     {
      "a": "graph_only",
@@ -243,13 +1182,13 @@
      "statistic": "two_level",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: +0.0341  95% two-level (seeds x items) CI [-0.0367, +0.1002]  P(A>B)=0.816",
-     "diff": 0.0341,
-     "lo": -0.0367,
-     "hi": 0.1002,
-     "p_a_gt_b": 0.816,
-     "p_two_sided": 0.3680000000000001,
-     "half_width": 0.06845
+     "line": "A - B: -0.0361  95% two-level (seeds x items) CI [-0.0849, +0.0096]  P(A>B)=0.060",
+     "diff": -0.0361,
+     "lo": -0.0849,
+     "hi": 0.0096,
+     "p_a_gt_b": 0.06,
+     "p_two_sided": 0.12,
+     "half_width": 0.04725
     },
     {
      "a": "graph_only",
@@ -259,13 +1198,13 @@
      "statistic": "paired_items",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: +0.0341  95% paired-bootstrap CI [-0.0367, +0.1002]  P(A>B)=0.816",
-     "diff": 0.0341,
-     "lo": -0.0367,
-     "hi": 0.1002,
-     "p_a_gt_b": 0.816,
-     "p_two_sided": 0.3680000000000001,
-     "half_width": 0.06845
+     "line": "A - B: -0.0361  95% paired-bootstrap CI [-0.0849, +0.0096]  P(A>B)=0.060",
+     "diff": -0.0361,
+     "lo": -0.0849,
+     "hi": 0.0096,
+     "p_a_gt_b": 0.06,
+     "p_two_sided": 0.12,
+     "half_width": 0.04725
     },
     {
      "a": "graph_only",
@@ -275,13 +1214,13 @@
      "statistic": "two_level",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: -0.0393  95% two-level (seeds x items) CI [-0.1245, +0.0424]  P(A>B)=0.167",
-     "diff": -0.0393,
-     "lo": -0.1245,
-     "hi": 0.0424,
-     "p_a_gt_b": 0.167,
-     "p_two_sided": 0.334,
-     "half_width": 0.08345
+     "line": "A - B: -0.0448  95% two-level (seeds x items) CI [-0.0953, +0.0038]  P(A>B)=0.035",
+     "diff": -0.0448,
+     "lo": -0.0953,
+     "hi": 0.0038,
+     "p_a_gt_b": 0.035,
+     "p_two_sided": 0.07,
+     "half_width": 0.04955
     },
     {
      "a": "graph_only",
@@ -291,13 +1230,13 @@
      "statistic": "paired_items",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: -0.0393  95% paired-bootstrap CI [-0.1245, +0.0424]  P(A>B)=0.167",
-     "diff": -0.0393,
-     "lo": -0.1245,
-     "hi": 0.0424,
-     "p_a_gt_b": 0.167,
-     "p_two_sided": 0.334,
-     "half_width": 0.08345
+     "line": "A - B: -0.0448  95% paired-bootstrap CI [-0.0953, +0.0038]  P(A>B)=0.035",
+     "diff": -0.0448,
+     "lo": -0.0953,
+     "hi": 0.0038,
+     "p_a_gt_b": 0.035,
+     "p_two_sided": 0.07,
+     "half_width": 0.04955
     },
     {
      "a": "hybrid",
@@ -307,13 +1246,13 @@
      "statistic": "two_level",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: -0.0805  95% two-level (seeds x items) CI [-0.1432, -0.0239]  P(A>B)=0.004",
-     "diff": -0.0805,
-     "lo": -0.1432,
-     "hi": -0.0239,
-     "p_a_gt_b": 0.004,
-     "p_two_sided": 0.008,
-     "half_width": 0.059649999999999995
+     "line": "A - B: +0.0005  95% two-level (seeds x items) CI [-0.0634, +0.0616]  P(A>B)=0.506",
+     "diff": 0.0005,
+     "lo": -0.0634,
+     "hi": 0.0616,
+     "p_a_gt_b": 0.506,
+     "p_two_sided": 0.988,
+     "half_width": 0.0625
     },
     {
      "a": "hybrid",
@@ -323,13 +1262,13 @@
      "statistic": "paired_items",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: -0.0805  95% paired-bootstrap CI [-0.1432, -0.0239]  P(A>B)=0.004",
-     "diff": -0.0805,
-     "lo": -0.1432,
-     "hi": -0.0239,
-     "p_a_gt_b": 0.004,
-     "p_two_sided": 0.008,
-     "half_width": 0.059649999999999995
+     "line": "A - B: +0.0005  95% paired-bootstrap CI [-0.0634, +0.0616]  P(A>B)=0.506",
+     "diff": 0.0005,
+     "lo": -0.0634,
+     "hi": 0.0616,
+     "p_a_gt_b": 0.506,
+     "p_two_sided": 0.988,
+     "half_width": 0.0625
     },
     {
      "a": "hybrid",
@@ -339,13 +1278,13 @@
      "statistic": "two_level",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: -0.0668  95% two-level (seeds x items) CI [-0.1256, -0.0144]  P(A>B)=0.005",
-     "diff": -0.0668,
-     "lo": -0.1256,
-     "hi": -0.0144,
-     "p_a_gt_b": 0.005,
-     "p_two_sided": 0.01,
-     "half_width": 0.0556
+     "line": "A - B: +0.0346  95% two-level (seeds x items) CI [-0.0281, +0.0953]  P(A>B)=0.856",
+     "diff": 0.0346,
+     "lo": -0.0281,
+     "hi": 0.0953,
+     "p_a_gt_b": 0.856,
+     "p_two_sided": 0.28800000000000003,
+     "half_width": 0.0617
     },
     {
      "a": "hybrid",
@@ -355,13 +1294,13 @@
      "statistic": "paired_items",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: -0.0668  95% paired-bootstrap CI [-0.1256, -0.0144]  P(A>B)=0.005",
-     "diff": -0.0668,
-     "lo": -0.1256,
-     "hi": -0.0144,
-     "p_a_gt_b": 0.005,
-     "p_two_sided": 0.01,
-     "half_width": 0.0556
+     "line": "A - B: +0.0346  95% paired-bootstrap CI [-0.0281, +0.0953]  P(A>B)=0.856",
+     "diff": 0.0346,
+     "lo": -0.0281,
+     "hi": 0.0953,
+     "p_a_gt_b": 0.856,
+     "p_two_sided": 0.28800000000000003,
+     "half_width": 0.0617
     },
     {
      "a": "codebert",
@@ -371,93 +1310,93 @@
      "statistic": "two_level",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: -0.1167  95% two-level (seeds x items) CI [-0.1871, -0.0524]  P(A>B)=0.000",
-     "diff": -0.1167,
-     "lo": -0.1871,
-     "hi": -0.0524,
-     "p_a_gt_b": 0.0,
+     "line": "A - B: -0.0187  95% two-level (seeds x items) CI [-0.0814, +0.0400]  P(A>B)=0.265",
+     "diff": -0.0187,
+     "lo": -0.0814,
+     "hi": 0.04,
+     "p_a_gt_b": 0.265,
+     "p_two_sided": 0.53,
+     "half_width": 0.060700000000000004
+    },
+    {
+     "a": "codebert",
+     "b": "ecfp_rf",
+     "role": "exploratory",
+     "preds": "best",
+     "statistic": "paired_items",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: -0.0187  95% paired-bootstrap CI [-0.0814, +0.0400]  P(A>B)=0.265",
+     "diff": -0.0187,
+     "lo": -0.0814,
+     "hi": 0.04,
+     "p_a_gt_b": 0.265,
+     "p_two_sided": 0.53,
+     "half_width": 0.060700000000000004
+    },
+    {
+     "a": "codebert",
+     "b": "ecfp_rf",
+     "role": "exploratory",
+     "preds": "final",
+     "statistic": "two_level",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: +0.0248  95% two-level (seeds x items) CI [-0.0251, +0.0742]  P(A>B)=0.836",
+     "diff": 0.0248,
+     "lo": -0.0251,
+     "hi": 0.0742,
+     "p_a_gt_b": 0.836,
+     "p_two_sided": 0.32800000000000007,
+     "half_width": 0.04965
+    },
+    {
+     "a": "codebert",
+     "b": "ecfp_rf",
+     "role": "exploratory",
+     "preds": "final",
+     "statistic": "paired_items",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: +0.0248  95% paired-bootstrap CI [-0.0251, +0.0742]  P(A>B)=0.836",
+     "diff": 0.0248,
+     "lo": -0.0251,
+     "hi": 0.0742,
+     "p_a_gt_b": 0.836,
+     "p_two_sided": 0.32800000000000007,
+     "half_width": 0.04965
+    },
+    {
+     "a": "hybrid",
+     "b": "graph_only",
+     "role": "exploratory",
+     "preds": "best",
+     "statistic": "two_level",
+     "n_a": 1,
+     "n_b": 1,
+     "line": "A - B: +0.0893  95% two-level (seeds x items) CI [+0.0347, +0.1468]  P(A>B)=1.000",
+     "diff": 0.0893,
+     "lo": 0.0347,
+     "hi": 0.1468,
+     "p_a_gt_b": 1.0,
      "p_two_sided": 0.0,
-     "half_width": 0.06735
+     "half_width": 0.05605
     },
     {
-     "a": "codebert",
-     "b": "ecfp_rf",
+     "a": "hybrid",
+     "b": "graph_only",
      "role": "exploratory",
      "preds": "best",
      "statistic": "paired_items",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: -0.1167  95% paired-bootstrap CI [-0.1871, -0.0524]  P(A>B)=0.000",
-     "diff": -0.1167,
-     "lo": -0.1871,
-     "hi": -0.0524,
-     "p_a_gt_b": 0.0,
+     "line": "A - B: +0.0893  95% paired-bootstrap CI [+0.0347, +0.1468]  P(A>B)=1.000",
+     "diff": 0.0893,
+     "lo": 0.0347,
+     "hi": 0.1468,
+     "p_a_gt_b": 1.0,
      "p_two_sided": 0.0,
-     "half_width": 0.06735
-    },
-    {
-     "a": "codebert",
-     "b": "ecfp_rf",
-     "role": "exploratory",
-     "preds": "final",
-     "statistic": "two_level",
-     "n_a": 1,
-     "n_b": 1,
-     "line": "A - B: -0.0675  95% two-level (seeds x items) CI [-0.1246, -0.0142]  P(A>B)=0.007",
-     "diff": -0.0675,
-     "lo": -0.1246,
-     "hi": -0.0142,
-     "p_a_gt_b": 0.007,
-     "p_two_sided": 0.014,
-     "half_width": 0.0552
-    },
-    {
-     "a": "codebert",
-     "b": "ecfp_rf",
-     "role": "exploratory",
-     "preds": "final",
-     "statistic": "paired_items",
-     "n_a": 1,
-     "n_b": 1,
-     "line": "A - B: -0.0675  95% paired-bootstrap CI [-0.1246, -0.0142]  P(A>B)=0.007",
-     "diff": -0.0675,
-     "lo": -0.1246,
-     "hi": -0.0142,
-     "p_a_gt_b": 0.007,
-     "p_two_sided": 0.014,
-     "half_width": 0.0552
-    },
-    {
-     "a": "hybrid",
-     "b": "graph_only",
-     "role": "exploratory",
-     "preds": "best",
-     "statistic": "two_level",
-     "n_a": 1,
-     "n_b": 1,
-     "line": "A - B: +0.1118  95% two-level (seeds x items) CI [+0.0327, +0.2045]  P(A>B)=0.998",
-     "diff": 0.1118,
-     "lo": 0.0327,
-     "hi": 0.2045,
-     "p_a_gt_b": 0.998,
-     "p_two_sided": 0.0040000000000000036,
-     "half_width": 0.08589999999999999
-    },
-    {
-     "a": "hybrid",
-     "b": "graph_only",
-     "role": "exploratory",
-     "preds": "best",
-     "statistic": "paired_items",
-     "n_a": 1,
-     "n_b": 1,
-     "line": "A - B: +0.1118  95% paired-bootstrap CI [+0.0327, +0.2045]  P(A>B)=0.998",
-     "diff": 0.1118,
-     "lo": 0.0327,
-     "hi": 0.2045,
-     "p_a_gt_b": 0.998,
-     "p_two_sided": 0.0040000000000000036,
-     "half_width": 0.08589999999999999
+     "half_width": 0.05605
     },
     {
      "a": "hybrid",
@@ -467,13 +1406,13 @@
      "statistic": "two_level",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: +0.1257  95% two-level (seeds x items) CI [+0.0451, +0.2195]  P(A>B)=0.999",
-     "diff": 0.1257,
-     "lo": 0.0451,
-     "hi": 0.2195,
-     "p_a_gt_b": 0.999,
-     "p_two_sided": 0.0020000000000000018,
-     "half_width": 0.0872
+     "line": "A - B: +0.1320  95% two-level (seeds x items) CI [+0.0682, +0.1964]  P(A>B)=1.000",
+     "diff": 0.132,
+     "lo": 0.0682,
+     "hi": 0.1964,
+     "p_a_gt_b": 1.0,
+     "p_two_sided": 0.0,
+     "half_width": 0.06409999999999999
     },
     {
      "a": "hybrid",
@@ -483,13 +1422,13 @@
      "statistic": "paired_items",
      "n_a": 1,
      "n_b": 1,
-     "line": "A - B: +0.1257  95% paired-bootstrap CI [+0.0451, +0.2195]  P(A>B)=0.999",
-     "diff": 0.1257,
-     "lo": 0.0451,
-     "hi": 0.2195,
-     "p_a_gt_b": 0.999,
-     "p_two_sided": 0.0020000000000000018,
-     "half_width": 0.0872
+     "line": "A - B: +0.1320  95% paired-bootstrap CI [+0.0682, +0.1964]  P(A>B)=1.000",
+     "diff": 0.132,
+     "lo": 0.0682,
+     "hi": 0.1964,
+     "p_a_gt_b": 1.0,
+     "p_two_sided": 0.0,
+     "half_width": 0.06409999999999999
     }
    ]
   }
