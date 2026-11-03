@@ -65,6 +65,14 @@
 - **各論文で「本研究との差」を一行で書く。** 査読で「これと何が違うか」と聞かれる論文は 8、16、17、18 の 4 本。この 4 本の差分の一行は、そのまま論文の関連研究節になる。
 - 会場が未確認のもの（5、17、18、19）は、引用前に会場を確かめる。報告書の未検証一覧（第 1 回 §9、第 2 回 §8）に入っている。
 
+## 第 3 回文献調査の後に足す枠（設計書 v0.5）
+
+設計書 v0.5 で、疎な attention を三つ目の系譜にし、実在モデルの attention 分析（H5）を柱に加えた。この二つは第 1 回・第 2 回の調査の対象外だったので、第 3 回の報告書が出たら、それぞれから 2〜3 本をこの一覧に足す。それまでの暫定の候補は、第 2 回で確認済みの次の 3 本（attention sink の分析）。
+
+- [Efficient Streaming Language Models with Attention Sinks](https://arxiv.org/abs/2309.17453)（Xiao ら。ICLR 2024）
+- [When Attention Sink Emerges in Language Models](https://arxiv.org/html/2410.10781v2)（Gu ら。ICLR 2025）
+- [Why do LLMs attend to the first token?](https://arxiv.org/html/2504.02732v4)（Barbero ら。会場はノードで未確認）
+
 ## 次に読む候補（20 本の後）
 
 20 本で足りない部分が出たときの補欠。Zoology（MQAR の定義）、Kimi Linear（ハイブリッド比率の ablation）、GRFs++（AST のような直径の大きいグラフでの GRF）、Attention is not all you need（ランク崩壊）、Accounting for Variance in Machine Learning Benchmarks（統計の手順）。URL は第 2 回報告書にある。
