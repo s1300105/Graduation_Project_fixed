@@ -2,7 +2,7 @@
 
 副題: 構造的事前分布による線形・SSM・疎の三系統の検証
 
-作成: 2026-11-02。版 0.5（2026-11-03。設計書。事前登録は予備調査の後に別文書として確定する）。版 0.5 で研究の主語を「効率的 attention」に据え直した: 疎な attention を三つ目の系譜として因子 A と H4 に加え、実在の事前学習モデルの attention を測る章（H5、§6.5）を足し、融合層の線形 attention を自前の Triton カーネルで実装する方針を明記し、LM の 2 族目・7B・異類性 TAG を削った。版 0.2 で締切（約 18 か月後）に合わせて §4.7、§9、§13 を更新。版 0.3 で第 1 期を 6 か月に延ばし、その計画を `docs/PHASE1_PLAN_survey_and_pilot_ja.md` に分離。版 0.4 で第 2 回文献調査（`reports/効率的 attention の鋭さと構造 文献調査.md`）の変更提案を反映（問いの言い換え、H1・H3・H4 の書き直し、鋭さ指標の表、因子 C の組み替え、SSM 融合の Chimera 形への確定、GRF と位置符号化の既定、データ・測定・統計手順、リスクと位置づけの追加）。
+作成: 2026-11-02。版 0.6（2026-11-03。版 0.6 で第 3 回文献調査（`reports/疎な attention と実在モデルの分析 文献調査.md`）の変更提案 19 件を反映: 疎の水準を MoBA 形のブロック上位 k に確定、疎の列を 4 水準に、支持再現率などの指標を追加、疎の揃え方、H5 の分布内と外挿の二領域化、§6.5 の対象モデル・課題・計算手順の確定、リスク 5 件、位置づけの追加。設計書。事前登録は予備調査の後に別文書として確定する）。版 0.5 で研究の主語を「効率的 attention」に据え直した: 疎な attention を三つ目の系譜として因子 A と H4 に加え、実在の事前学習モデルの attention を測る章（H5、§6.5）を足し、融合層の線形 attention を自前の Triton カーネルで実装する方針を明記し、LM の 2 族目・7B・異類性 TAG を削った。版 0.2 で締切（約 18 か月後）に合わせて §4.7、§9、§13 を更新。版 0.3 で第 1 期を 6 か月に延ばし、その計画を `docs/PHASE1_PLAN_survey_and_pilot_ja.md` に分離。版 0.4 で第 2 回文献調査（`reports/効率的 attention の鋭さと構造 文献調査.md`）の変更提案を反映（問いの言い換え、H1・H3・H4 の書き直し、鋭さ指標の表、因子 C の組み替え、SSM 融合の Chimera 形への確定、GRF と位置符号化の既定、データ・測定・統計手順、リスクと位置づけの追加）。
 根拠とした文献調査: `reports/LLM GNN 融合 attention 先行研究.md`（調査ノートは `research_notes/LLM GNN 融合 attention 先行研究/`）。本文中の出典は全てその報告書で URL を確認したもの。
 
 ## 0. 一文で
@@ -32,6 +32,9 @@
 | 製品の線形 attention / SSM LLM は例外なく softmax 層を残すハイブリッド（Jamba 1:7、Qwen3-Next 3:1、Kimi Linear 3:1、MiniMax-01 7:1、Nemotron-H 8%）。比率の曲線は早く平坦になり、Kimi では 3:1 が純 softmax より良い | 第 2 回報告書 §2.2 の表 |
 | GRF は重要度重みなしでは無マスクと同等（0.689 対 0.693）。ICLR 2025 の位相マスクと GRFs++ の公開実装は無い。5,985 頂点では厳密計算が GRF++ を上回る | [Topological Masking](https://arxiv.org/html/2410.03462v2)、[GRFs++](https://arxiv.org/html/2510.07716v1) |
 | AST 由来の課題で位置符号化の選択は F1 を 0.2 しか動かさないが、RRWP はステップ時間とメモリを約 2 倍にする | [GDT](https://arxiv.org/html/2511.08028v1) |
+| 疎な attention は「代理得点 → 上位 k → 選んだ支持の上で厳密な softmax」に収束した。支持の上の softmax は厳密なので、失敗は選択の誤りとして現れる（ブロック平均で単一のキーが薄まる） | [NSA](https://arxiv.org/abs/2502.11089)、[MoBA](https://arxiv.org/abs/2502.13189)、[FlashMoBA](https://arxiv.org/abs/2511.11571) |
+| パラメータとトークンを揃えた唯一の比較（0.4B / 1.4B）では、純 NSA は Transformer++ にやや劣り、Gated DeltaNet との上下は規模で入れ替わる。壁時計とメモリを揃えた 疎 対 線形 対 SSM の比較は存在しない | [He & Garner](https://arxiv.org/html/2510.20787) |
+| 疎な attention が実カーネルで速くなるのは、ほぼ 32K 超かつ疎性 75% 超のときだけで、学習時には KV のメモリを減らさない | 第 3 回報告書 §3 |
 | 構造マスクを厳密に入れた線形 attention は softmax と同精度に戻る。グラフランダム特徴（GRF）を φ の内部に入れると差の 75〜80% を回復する（ImageNet: 無マスク線形 0.693 → GRF 0.730 → 厳密マスク・softmax 0.741）。ただし視覚・点群のみ | [Topological Masking, ICLR 2025](https://arxiv.org/html/2410.03462v2) |
 | 事前学習 LM のトークン列とグラフを構造つき線形 attention で結んだ研究は無い（13 クエリと被引用 94 件を走査） | 報告書 §3 |
 | グラフ SSM は順序型（Graph-Mamba、GMN）と作用素型（GSSC、Chimera、MP-SSM）に分かれ、順序型は順序だけで精度が 12 点動く。LLM との融合は分子の HSA-Net 1 件で、そこでは Mamba 単独は cross-attention 単独に勝たない | [Chimera](https://arxiv.org/html/2510.12111v1)、[HSA-Net](https://arxiv.org/html/2508.08334v1) |
@@ -61,12 +64,16 @@
 注: 「線形 attention の一様化（エントロピー）は長いほど悪化する」という形の法則は文献に無い（softmax には Θ(1/n) の定理があるが、線形には無い。Hedgehog は softmax との KL が 256〜4096 で一定と報告）。この前提は P4 で実測し、成り立たなくても H3 は検索容量の形で検定できる。
 反証: 回復量が L に対して平坦で、**かつ**同じ長さで測った合成検索課題（「属性 X を持つノードはどれか」型）の正答率にも長さ依存が無い。
 
-**H4（安いか）** 鋭さを取り戻す構造なしの手段、すなわち (a) 局所 softmax 窓 64 / 128 ＋ 線形大域（Based / LoLCATs 形）、(b) データ依存ゲート ＋ delta 則（GLA / GDN 形）、(c) 融合層 F 層のうち 1 層を全対 softmax にする周期ハイブリッド（F = 4 で 3:1、Kimi / Qwen3-Next 形）、(d) 特徴写像の鋭化（Hedgehog または Taylor 2 次）、(e) 学習で選ぶ疎な softmax（各クエリが上位 k 個のブロックだけを見る方式）と比べ、同じ壁時計・ピークメモリ・KV / 状態バイトの下で、構造の方が回復量が大きい。(e) は第 3 回文献調査で水準を確定する（§4.2、§13）。
+**H4（安いか）** 鋭さを取り戻す構造なしの手段、すなわち (a) 局所 softmax 窓 64 / 128 ＋ 線形大域（Based / LoLCATs 形）、(b) データ依存ゲート ＋ delta 則（GLA / GDN 形）、(c) 融合層 F 層のうち 1 層を全対 softmax にする周期ハイブリッド（F = 4 で 3:1、Kimi / Qwen3-Next 形）、(d) 特徴写像の鋭化（Hedgehog または Taylor 2 次）、(e) 学習で選ぶ疎な softmax（MoBA 形のブロック上位 k。§4.2）と比べ、同じ壁時計とピークメモリの下で、構造の方が回復量が大きい（揃え方は §4.6）。(e) については予測を一つ足す: (e) の検索の損失は、主に支持再現率（選んだブロックに目標のキーが入っていた割合）の不足から来る。
 文献の ablation は (a) が単独で最大の検索回復を与え、次に (b)、(d) は perplexity を戻すが検索は部分的、と一貫している。製品の線形 LLM が全てハイブリッドである事実は、帰無仮説「構造は鋭さの回復に必要ではない」を強く予想させる。
 反証: (a)〜(c) のいずれかが同コストで同等以上。この場合「構造は鋭さの回復に必要ではなく、系列の局所性で足りる」が結論になり、それ自体が報告価値を持つ。
 
-**H5（実在モデル）** 公開されている線形 attention・SSM・ハイブリッドの事前学習モデルでは、(i) 検索に使われるヘッドの正規化エントロピーが入力の長さとともに上がり、同じ長さで検索課題の正答率が落ちる。(ii) ハイブリッドでは、鋭い読み出し（低い正規化エントロピー、高い top-k 質量）が softmax 層と窓の層に集中する。同規模の softmax モデルと並べて比べる。
-反証: (i) 長さに対して、鋭さの指標と検索の正答率が連動しない。(ii) 鋭い読み出しが softmax 層に集中しない。どちらも、統制実験で使う鋭さの指標が実モデルの失敗を説明しないことを意味し、H1〜H4 の解釈の範囲を狭める。
+**H5（実在モデル）** 同じデータ・同じ規模で学習した softmax・線形・SSM・ハイブリッドの公開モデル（§6.5）で、次が成り立つ。
+(i) 層・ヘッドごとの指標が検索の成否を予測する AUROC は、検索ヘッド・検索層で最も高い。指標の主は回答の最初のステップでの needle 質量、副は正規化エントロピー Ĥ、top-k 質量、sink 質量、正規化平均距離。その AUROC と正答率の log L に対する傾きを、**学習長以内（分布内: 1K〜2K、m-a-p と NVIDIA は 4K まで）と学習長の外（外挿: 4K〜16K）で別々に**推定する。公開されている一致した組は全て 2K〜4K で学習されているため、4K を超える長さは両方の族にとって外挿になる。
+(ii) ハイブリッドでは、needle 質量と低い Ĥ が softmax 層と窓の層に集中する。
+指標の向きは族で異なりうる。softmax は分散で Ĥ が上がるが、SSM は学習長を超えると新近性に崩れて正規化平均距離が下がり、Ĥ はむしろ下がりうる（DeciMamba の観察）。そこで Ĥ の向きは族ごとに予測する。
+反証: (i) 分布内で、全ての検索ヘッドの AUROC の 95% 区間が 0.5 を含む。(ii) needle 質量が softmax 層に集中しない。どちらも、統制実験で使う鋭さの指標が実モデルの失敗を説明しないことを意味し、H1〜H4 の解釈の範囲を狭める。外挿での softmax 側の失敗は、位置符号化の外挿の失敗と交絡するので別に扱う。
+「AUROC 対 log L」をヘッドごとに測った研究は見つかっていない（第 3 回報告書 §8）。これが柱 2 の中心の新規性になる。
 
 **H1〜H5 の全てで、精度だけでなく鋭さの指標（§3.1）が同じ向きに動くことを機構の証拠とする。** 精度だけなら相関の報告で終わる。
 
@@ -87,8 +94,16 @@
 | 実効ランク | erank = exp(H(σ / Σσ)) を attention 行列**と層出力**の両方に。同じ N でのみ比較 | GraphTARIF の定理と Dong らの残差に対応 |
 | 構造質量 | 1-hop、2-hop、整合辺の上に乗る質量の割合（近傍サイズを併記） | 構造が読まれたか |
 | 行動指標 | 合成検索課題（「属性 X を持つノードはどれか」型。MQAR / S-NIAH 相当）の正答率を長さ別に | 鋭さと精度の連鎖の証拠 |
+| 支持再現率 | \|G ∩ 選んだ支持\| / \|G\|。G は needle、構造上の目標、整合先 | 疎の水準。選択の誤りを下流の精度から切り離す |
+| 支持内 Ĥ | 選んだ支持の上のエントロピーを log \|選んだ支持\| で正規化 | 疎の水準。選んだ後の鋭さ |
+| 正規化平均距離 | 重み付きの平均距離 / L（DeciMamba の式 8） | SSM が学習長を超えて新近性に崩れるかの検出 |
+| needle 質量 | 回答の最初のステップで needle のトークンに乗る質量 | H5 の主指標 |
 
-全て長さ L_t とノード数 N で層別して報告する。学習の前後と、構造の有無で比較する。出典と各指標の由来は第 2 回報告書 §3.4。
+全て長さ L_t とノード数 N で層別して報告する。学習の前後と、構造の有無で比較する。出典と各指標の由来は第 2 回報告書 §3.4 と 第 3 回報告書 §2・§5・§6。
+
+暗黙の重みの定義は対象で分ける。融合層の線形 attention（正の φ）は φ(q)ᵀφ(k_j) / Σ_i φ(q)ᵀφ(k_i) をそのまま使う。事前学習の Mamba / GLA / Gated DeltaNet の暗黙の写像は符号つきで和が 1 にならないので、|α| / Σ|α| を主とし、ReLU 版と α² 版を頑健性の確認に使い、行の生の L1 質量と負の質量の割合を併記する。
+
+sink は除外するだけでなく共変量として扱う。sink は検索に因果的に必要で、学習時の文脈長とともに強まるためである。探針（繰り返しトークン、NIAH）ごとに別に記録し、Llama-3.1 系では閾値 ε = 0.8 も併記する。
 
 ### 3.2 大きさ
 
@@ -132,7 +147,7 @@
 |---|---|---|
 | softmax | FlashAttention 2。加法バイアスとマスクは GDT の標準形 softmax(QKᵀ/√d ＋ B)V | コストの基準。「精度の上限」とは呼ばない（Kimi の 3:1 や GDN 1.3B のように、ハイブリッドや線形が softmax を上回る例があるので、対照が softmax を超える可能性を事前登録に書く） |
 | 線形 | Performer 型の正のランダム特徴 φ（特徴数 r は予備実験で決め、全腕で固定）。累積は fp32（線形 attention は数値精度に敏感）。φ の内部に構造を入れる水準は自前の Triton カーネルで実装する | 本命 |
-| 疎 | 各クエリが選んだ少数のキー（またはキーのブロック）にだけ softmax を掛ける。選び方は学習（上位 k 個のブロック選択）か構造（グラフ近傍のブロック）か両方。FlexAttention の BlockMask で実装し、ブロック疎性を記録する | 三つ目の系譜。「鋭さを保ったまま安くする」別解。具体的な方式（選択の学習法、ブロックの大きさ、k）は第 3 回文献調査で確定する |
+| 疎 | MoBA 形のブロック上位 k。ゲートは ⟨q, ブロックの平均キー⟩、先頭ブロックと現ブロックを強制で含め（k に数える）、選んだ支持の上で厳密な softmax を掛ける。ブロック B ∈ {64, 128}（主は FlexAttention の既定の 128）、キー予算 k·B ∈ {256, 512, 1024}（B = 64 なら k ∈ {4, 8, 16}、B = 128 なら k ∈ {2, 4, 8}）。副として NSA の選択枝だけ（B = 64、先頭 1・局所 2 を含む上位 n）を P7 で比べる。最終の k は 線形 ＋ φ の内 と壁時計が揃う値を P7 で選ぶ。実装は FlexAttention の BlockMask を上位 k の添字から直接組み、構築時間を壁時計に含め、別にも記録する。トークン単位の DSA は MLA を前提とするので対象外 | 三つ目の系譜。「鋭さを保ったまま安くする」別解 |
 | SSM | 作用素型、Chimera 形に確定。結合列 [トークン ; ノード] を一つの DAG（テキストは有向線グラフ、AST は親→子の有向辺、整合辺はトークン→ノード）とし、L = (I − A)⁻¹ の遷移をトポロジカル順の 1 パス O(\|V\| ＋ \|E\|) で計算する。一般グラフ（TAG、合成）は辺を 2 方向の DAG に分解するか直径で打ち切った Neumann 級数（二次）で近似し、その二次コストを §6.2 で測る。順序型（ノードを並べて走査）は使わない。状態追跡が要る課題では固有値域 [−1, 1] を任意水準に加える | 第 2 の本命（第 3 期）。「線形時間の別系譜でも同じか」 |
 
 ### 4.3 因子 B: 構造の入口 S
@@ -147,7 +162,14 @@
 
 主効果と、F × S の交互作用（特に 線形 × φ の内）が H1 の検定対象。SSM 列では 3 水準が同一実装の A の違いになる。
 
-疎の列（表に入れず別に定める）: 「なし」= 学習で上位 k 個のブロックを選ぶ、「構造で選ぶ」= 整合辺と構造辺で到達できるノードを含むブロックを選ぶ、「併用」= 両方の和集合。疎で構造が勝つかは「学習による選択」と「構造による選択」を同じ k で比べることになり、H4 の (e) と表裏一体である。
+疎の列（表に入れず別に定める）は 4 水準。
+
+- **固定**: 窓 ＋ 先頭ブロック。内容にも構造にも依らない床。
+- **学習**: MoBA 形（§4.2）。
+- **構造**: SASA 形。同じ B と k で、ブロックごとに Σ α_k W^k（または RRWP）の質量を足し、その上位 k 個のブロックを選ぶ。
+- **併用**: 学習で k/2、構造で k/2。和集合にはしない（予算が揃わなくなるため）。
+
+構造で選んだブロックのうち窓の外にある割合を記録する。疎で構造が勝つかは「学習による選択」と「構造による選択」を同じ k で比べることになり、H4 の (e) と表裏一体である。この比較は、別々に学習した腕としてはまだ誰も行っていない。最も近い SASA の ablation は学習統計の側が効いたことを示すので、新規性は「構造が勝つ」という予言ではなく、同じコストで測ったという事実に置く（第 3 回報告書 §4、§8）。
 
 ### 4.4 因子 C: 構造なしの鋭さ回復（H4 の対照）
 
@@ -157,7 +179,7 @@
 - (b) データ依存ゲート ＋ delta 則（GLA / Gated DeltaNet 形）。状態側の鋭さの回復。
 - (c) 周期ハイブリッド: 融合層 F 層のうち 1 層を全対 softmax（F = 4 で 3:1。製品の最頻比）。
 - (d) 特徴写像の鋭化: Hedgehog の exp-MLP か Taylor 2 次（特徴数を揃える）。
-- (e) 学習で選ぶ疎な softmax（上位 k 個のブロック選択）。k は 線形 ＋ φ の内 と壁時計が揃うように決める。
+- (e) 学習で選ぶ疎な softmax（MoBA 形のブロック上位 k、§4.2）。k は 線形 ＋ φ の内 と壁時計が揃うように決める。
 
 版 0.3 にあった「ランク回復ゲート（GraphTARIF 形）」は隣接を使う GAT 分岐なので構造なしではなく、S = φ の外に移した。構造なしのランク回復（FLatten の深さ方向畳み込み、MHLA のトークン分割）と Gumbel 疎化は任意水準に落とす（新しい支持証拠が無い）。
 
@@ -176,6 +198,7 @@
 ### 4.6 揃える規則
 
 - 学習可能パラメータ数は同じ F の中で ±5%。F をまたぐ比較と因子 C の比較はパラメータではなく壁時計・ピークメモリ・KV / 状態バイトで揃え、全てを報告する。
+- ただし疎の水準（(e) と疎の列）は、**壁時計とピークの活性メモリ**で揃える。KV / 状態のバイト数は報告するが揃えない。疎は KV が O(N·d)、線形は状態が O(d²) で、原理的に揃わないためである。この規則は事前登録に明記する。
 - 学習ステップ数、データ、seed、最適化設定は全腕で同一。
 - 凍結 LM は全腕で同じキャッシュを読む。LM の中に LoRA を入れるのは「直列化 LoRA」対照だけ。
 
@@ -233,11 +256,14 @@
 
 学習はせず、推論だけで測る。
 
-- **対象。** 線形・SSM・ハイブリッドの公開モデルと、同規模の softmax モデル。候補は Mamba-2 の 130M〜2.8B、flash-linear-attention が公開する小型の Gated DeltaNet / GLA、ハイブリッドの Falcon-H1 1.5B、Hymba-1.5B。比較の softmax 側は同じ学習データ・同規模のものがあればそれを選ぶ（Mamba-2 と同じ Pile で学習した Pythia など）。最終的な一覧は第 3 回文献調査と P10 で決める。
-- **課題。** 長さ別（1K / 2K / 4K / 8K / 16K）の合成検索課題（S-NIAH 型、MQAR 型、電話帳型）と、§5 の合成グラフを直列化した文章での属性検索。
-- **指標。** §3.1 の表をそのまま使う。線形 attention と SSM は暗黙の重みを復元する（Mamba-2 は双対形式で L ⊙ CBᵀ を明示できる）。層ごと・ヘッドごとに、検索の成否で条件づけた指標を出す。sink 質量は必ず別に報告する。
-- **出力。** 「鋭さの指標 対 長さ」と「検索の正答率 対 長さ」を同じ図に重ねる。ハイブリッドでは層の種類（softmax / 窓 / 線形・SSM）ごとに分けて描く。
-- **計算量。** 3B 以下を 4bit で推論するだけなので、RTX 3090 1 枚で足りる。16K の長さでは暗黙の重みの復元をクエリの標本に限る。
+- **対象。** 同じデータ・同じ規模で学習した一致した組を使う（HF の ID は 第 3 回報告書 §7 のもの。P10 で最終確認する）。
+  - 主: `state-spaces/mamba2-2.7b`、`state-spaces/transformerpp-2.7b`、`state-spaces/mamba2attn-2.7b`（Pile 300B トークン）。`m-a-p/1.3B-100B-{GatedDeltaNet,GLA}-{pure,hybrid-24-1,hybrid-3-1}` と `m-a-p/transformer_1.3B_baseline`（FineWeb-Edu）。
+  - 副: `hazyresearch/{based-1b-50b,attn-1b-50bn,mamba-1b-50b}`（同じデータ順）、fla-hub の 1.3B-100B 群、`nvidia/mamba2-hybrid-8b-3t-32k`（一致した softmax 対照とは長さが異なることを明記）。
+  - 補足: Falcon-H1、Hymba、Zamba2、Jet-Nemotron。同じデータの softmax 対照が無いので、定性的な比較にとどめる。
+- **課題。** トークン長で生成する。格子は長さ 5 点（1K / 2K / 4K / 8K / 16K）× 深さ 10 点 × needle 20 個以上。妨害 needle を 3 種（なし、同じ形式の別キー、近似重複キー）用意し、深さで層別する。課題の型は S-NIAH 型、MQAR 型、電話帳型、§5 の合成グラフを直列化した文章での属性検索。needle のトークン幅を記録し、族をまたぐときは単語か UUID を値に使う。BOS は全条件で揃えて記録する。
+- **指標。** §3.1 の表をそのまま使う。主分析は**「AUROC 対 log L」**で、ヘッドごとに分布内と外挿で別に推定する。ヘッドには帰納スコア、echo スコア、Wu らの検索スコア（閾値 0.1）、sink のラベルを付け、Wu・QRHead・DuoAttention のヘッド集合の Jaccard 係数を出す。因果の確認として、上位 K 個の検索ヘッドのマスクとランダムな K 個のマスクを比べる。
+- **出力。** 「指標 対 長さ」と「検索の正答率 対 長さ」を同じ図に重ね、ハイブリッドでは層の種類（softmax / 窓 / 線形・SSM）ごとに分けて描く。AUROC 対 log L の図をヘッドの種類ごとに描く。
+- **計算手順。** 2.7B 以下は bf16 で推論する（量子化は attention の統計を乱しうる）。Transformer は SDPA で順伝播し、フックした RoPE 後の Q / K から、クエリのブロック（b = 512 で約 1.07 GB）ごとに attention を再計算する。エントロピーはストリーミングの恒等式 H = L − Σ p·s（L は行の log-sum-exp）で求め、全行列は持たない。Mamba-2 はヘッドごとに L ⊙ CBᵀ を組んで統計だけを残す。Mamba-1 は必要な行だけを O(L·N) で計算する。累積の対数減衰は fp32 で計算し、0·log 0 は 0 とする。RTX 3090 1 枚で足りる。
 
 ## 7. 統計と事前登録
 
@@ -304,6 +330,11 @@
 | tree-sitter の C/C++ はマクロと `#if` で ERROR ノードや誤解析を生む | 第 2 回報告書 §4.3 | `has_error()` と ERROR / MISSING 数を manifest に記録し閾値で除外。既知マクロはスタブしてから解析。失敗を空グラフにしない |
 | 融合層をスクラッチ学習すると構造差を過大評価し得る（Amos ら） | 第 2 回報告書 §5.2 | 凍結 LM のキャッシュ上で融合層のみ学習する設計に加え、denoising 事前学習つきの対照を 1 本置く（§4.5） |
 | 短系列では線形・SSM が FlashAttention 2 に負け、交差点が実データの長さの外に出る | 第 2 回報告書 §2.5、§5.1 | P8 で短系列帯を含めて測り、外に出るなら効率の主張をトークン数と大きい合成データに限定する |
+| 学習選択のマスクは層ごと・入力ごとに変わるので、FlexAttention の BlockMask の構築費（数百マイクロ秒）を償却できない | 第 3 回報告書 §3.2 | 上位 k の添字から直接組み、構築時間を壁時計に含めて別にも記録する |
+| 16K 以下・ブロック 64〜128 では、疎が 3090 の FlashAttention 2 に勝てない可能性がある | 第 3 回報告書 §3.1 | P8 で測る。壁時計を揃えるための k が大きくなることを、(e) に不利な条件として報告する |
+| 学習選択のルータの冷えた始動と、疎な勾配による劣化（MoBA の教師つき微調整での劣化） | 第 3 回報告書 §2.1 | 密な warm-up（DSA 形の KL 蒸留）を任意の水準として入れる |
+| BOS / sink が欠けると検索が崩れる（Gemma 7B で RULER-4K が 82.57 から 0） | 第 3 回報告書 §5.2 | BOS を全条件で固定し、記録する |
+| 一致したチェックポイントは全て 2K〜4K で学習されており、外挿の比較が位置符号化の失敗と交絡する | 第 3 回報告書 §7.3 | H5 を分布内と外挿の二領域に分けて推定する |
 
 ## 11. 位置づけ（必ず対置する先行）
 
@@ -321,8 +352,9 @@
 | 鋭さの理論 | [Softmax is not Enough](https://arxiv.org/html/2410.01104v3)、[SSMax](https://arxiv.org/abs/2501.19399)、[Long-Context Generalization with Sparse Attention](https://arxiv.org/abs/2506.16640)、[Zhai et al.](https://arxiv.org/abs/2303.06296)、[Dong et al.](https://arxiv.org/abs/2103.03404)、[Barbero et al.](https://arxiv.org/abs/2406.04267) |
 | 再帰の作用素への構造 | [Chimera](https://arxiv.org/html/2510.12111)、[GrootVL](https://arxiv.org/abs/2406.02395)、[pLSTM](https://arxiv.org/html/2506.11997v1)、[Hydra](https://arxiv.org/abs/2407.09941v1)、[Mamba-2](https://arxiv.org/html/2405.21060v1) |
 | 位相マスクと GRF | [Topological Masking](https://arxiv.org/html/2410.03462v2)、[GRFs++](https://arxiv.org/html/2510.07716v1)、[q-GRFs](https://arxiv.org/html/2305.12470)、[Black et al.](https://arxiv.org/html/2402.14202v4) |
-| 実在 LLM の attention の分析 | [Efficient Streaming Language Models with Attention Sinks](https://arxiv.org/abs/2309.17453)、[When Attention Sink Emerges in Language Models](https://arxiv.org/html/2410.10781v2)、[Why do LLMs attend to the first token?](https://arxiv.org/html/2504.02732v4)、[Repeat After Me](https://arxiv.org/html/2402.01032v2)。第 3 回文献調査で補う |
-| 疎な attention | 第 3 回文献調査で埋める（今回の 2 回の調査の対象外） |
+| 実在 LLM の attention の分析 | [Efficient Streaming Language Models with Attention Sinks](https://arxiv.org/abs/2309.17453)、[When Attention Sink Emerges in Language Models](https://arxiv.org/html/2410.10781v2)、[Why do LLMs attend to the first token?](https://arxiv.org/html/2504.02732v4)、[Repeat After Me](https://arxiv.org/html/2402.01032v2)、[Retrieval Head](https://arxiv.org/abs/2404.15574)、[DuoAttention](https://arxiv.org/abs/2410.10819)、[QRHead](https://arxiv.org/abs/2506.09944)、[Induction Heads](https://transformer-circuits.pub/2022/in-context-learning-and-induction-heads/index.html)、[Found in the Middle](https://arxiv.org/abs/2406.16008)、[Hidden Attention of Mamba](https://arxiv.org/abs/2403.01590)、[Unified Implicit Attention](https://arxiv.org/abs/2405.16504)、[DeciMamba](https://arxiv.org/abs/2406.14528)、[Gather-and-Aggregate](https://arxiv.org/abs/2504.18574)、[Stuffed Mamba](https://arxiv.org/abs/2410.07145)、[Hybrid Linear Attention](https://arxiv.org/abs/2507.06457) |
+| 疎な attention | [NSA](https://arxiv.org/abs/2502.11089)、[MoBA](https://arxiv.org/abs/2502.13189)、[FlashMoBA](https://arxiv.org/abs/2511.11571)、[DSA](https://arxiv.org/abs/2512.02556)、[SeerAttention](https://arxiv.org/abs/2410.13276)、[The Sparse Frontier](https://arxiv.org/abs/2504.17768)、[He & Garner](https://arxiv.org/html/2510.20787)、[SASA](https://arxiv.org/abs/2205.13730)、[Exphormer](https://arxiv.org/abs/2303.06147)、[BigBird](https://arxiv.org/abs/2007.14062) |
+| 新規性への脅威（事前登録の前に全文を読む） | [Retrieval Heads are Dynamic](https://arxiv.org/abs/2602.11162)、[Attention Entropy is a Key Factor](https://arxiv.org/html/2412.16545)、[From Rigid to Dynamic](https://arxiv.org/pdf/2606.09508)、[Cracks in the Foundation](https://arxiv.org/pdf/2608.10296)、[LongMamba](https://arxiv.org/pdf/2504.16053)。いずれかが長さ別の成否条件づけを含んでいれば、§6.5 の主張を「一致した組での族の比較」に絞り直す |
 
 貢献の言い方: 「新しい融合機構の提案」ではなく、「効率的 attention の三系統（線形・SSM・疎）が softmax に対して何を失い、構造と系列の局所性のどちらがそれを安く取り戻すかを、統制された実験と実在モデルの分析の両方で測った」。
 
@@ -337,7 +369,8 @@
 | `utils/process/text_cache.py`（新規） | 凍結 LM の最終層隠れ状態を、整合ノード単位にプールして fp16 で保存。LM 名・層・プール法を manifest に記録 |
 | `models/fusion/`（新規） | 結合列の融合層。引数 `--attn_form {softmax,linear,ssm,sparse}`、`--struct_entry {none,outside,inside_exact,inside_grf,mask}`、`--sharpen {none,window,gate_delta,periodic_softmax,featmap,learned_sparse}`。鋭さ指標を返すフック |
 | `kernels/`（新規） | Triton で書く線形 attention のカーネル。φ の内部に構造を入れる版（厳密な冪級数との要素積、GRF のテンソル積）を、チャンク形式の順伝播と逆伝播で実装する。正しさは素朴な PyTorch 実装との数値比較（fp32 と bf16）でテストする。整ったら flash-linear-attention の作法に合わせて寄稿を検討する |
-| `scripts/analyze_pretrained_attention.py`（新規） | §6.5 の分析。公開モデルを読み込み、長さ別の検索課題で層・ヘッドごとの鋭さ指標と正答率を出す。線形と SSM は暗黙の重みを復元する |
+| `scripts/analyze_pretrained_attention.py`（新規） | §6.5 の分析。`mamba_ssm` 形式と fla 形式と HF 形式の読み込み、長さ別の検索課題の生成、クエリのブロックごとの再計算とストリーミングのエントロピー、暗黙の写像の 3 種の正規化、ヘッドのラベル付け、AUROC 対 log L の集計 |
+| 融合層の疎の引数 | `--sparse_select {fixed,learned,struct,mixed}`、`--sparse_block {64,128}`、`--sparse_budget`（キー数）。融合層は支持再現率を返すフックを持つ |
 | `models/LMGNN.py`（変更） | 既存の `GraphCodeFusion` を `--attn_form softmax --struct_entry none` の 1 点として残し、新しい融合層を選べるようにする |
 | `run.py`（変更） | 上の引数、壁時計・ピークメモリの記録、`--data_fraction`、定数トークン・MLP アダプタ・直列化 LoRA の対照腕 |
 | `data/scripts/make_synth_graph_json.py`（新規） | 合成グラフ推論の生成（課題・N・密度・seed を引数に）。正解は networkx で計算 |
@@ -356,5 +389,6 @@
 4. 3B の LoRA 対照が 24 GB に収まらない場合のクラウド予算（100〜200 ドル規模）か、大学の共用 GPU の利用可否。
 5. ~~SSM 融合の実装方針~~ 解決（版 0.4）: Chimera 形のレゾルベント。結合列を DAG として 1 パス、巡回グラフは 2 方向 DAG か直径打ち切り、構造を入れる位置は A の辺重み（§4.2、§4.3）。Mamba 系 LLM 側の候補と LoRA の当て先も §4.7 で確定。残るのは直径打ち切りの次数の選び方で、第 3 期の事前登録追補で固定する。
 6. 第 2 期末の投稿先（ICLR / NeurIPS の効率的系列モデル系のワークショップか、LoG か）。版 0.5 で主語を attention に寄せたので、前者を第一候補にする。
-7. 疎な attention の具体的な方式（学習による選択の方法、ブロックの大きさ、k）。第 3 回文献調査の後、P7 で決める。
-8. §6.5 で分析する公開モデルの一覧と、比較する softmax モデル。第 3 回文献調査と P10 で決める。
+7. ~~疎な attention の方式~~ 方針は決定（版 0.6）: MoBA 形のブロック上位 k、B ∈ {64, 128}、k·B ∈ {256, 512, 1024}、NSA の選択枝を副。残るのは P7 での B と k の最終値と、壁時計を揃える規則。
+8. ~~§6.5 の公開モデル~~ 方針は決定（版 0.6、§6.5）。残るのは P10 での HF の ID の最終確認と、長さの上限。
+9. 新規性への脅威 5 件（§11 の最終行）の全文確認。事前登録の前に行う。
